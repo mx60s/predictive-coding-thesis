@@ -1,8 +1,5 @@
 import torch
 
-import utils.nets as nets
-from utils.exceptions import ArchitectureError
-
 import torchmetrics
 from torchmetrics.classification import MulticlassRecall
 
@@ -19,9 +16,10 @@ def train(dataloader, model, loss_fn, optimizer, device) -> float:
         X = X.to(device)
         optimizer.zero_grad()
         
+        #print(X.shape)
         gen = model(X)
 
-        loss = loss_fn(gen, X) 
+        loss = loss_fn(gen[0], X) 
         loss.backward()
         optimizer.step()
 
