@@ -1,7 +1,6 @@
 import torch
 
 import torchmetrics
-from torchmetrics.classification import MulticlassRecall
 
 import numpy as np
 
@@ -19,7 +18,7 @@ def train(dataloader, model, loss_fn, optimizer, device) -> float:
         #print(X.shape)
         gen = model(X)
 
-        loss = loss_fn(gen[0], X) 
+        loss = loss_fn(gen, X) 
         loss.backward()
         optimizer.step()
 
@@ -42,9 +41,8 @@ def test(dataloader, model, loss_fn, device) -> float:
     with torch.no_grad():
         for X, _ in dataloader:
             X = X.to(device)
-            pred = model(X)
-            targets.append(y.tolist())
-            test_loss += loss_fn(pred, X).item()
+            gen = model(X)
+            test_loss += loss_fn(gen, X).item()
 
     test_loss /= num_batches
 

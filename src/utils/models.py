@@ -47,8 +47,10 @@ class BasicBlockEnc(nn.Module):
 
     def forward(self, x):
         # some modifications from source code to fit the paper's description
-        out = self.bn1(torch.relu(self.conv1(x))) 
+        out = self.bn1(torch.relu(self.conv1(x)))
+        #print('after block 1', out.shape)
         out = self.bn2(torch.relu(self.conv2(out)))
+        #print('after block 2', out.shape)
         out += self.shortcut(x)
         out = torch.relu(out)
         return out
@@ -77,31 +79,27 @@ class BasicBlockDec(nn.Module):
             )
 
     def forward(self, x):
-        # keeping this as original for now to fix issues
-        # did not help lol
-        out = torch.relu(self.bn2(self.conv2(x)))
+        out = self.bn2(torch.relu(self.conv2(x)))
         out = self.bn1(self.conv1(out))
         out += self.shortcut(x)
         out = torch.relu(out)
         return out
 
-
 class ResNet18Enc(nn.Module):
-    def __init__(self, num_Blocks=[2,2,2,2], z_dim=10, nc=3):
+    def __init__(self, num_Blocks=[2,2,2,2], nc=3):
         super().__init__()
         self.in_planes = 32
-        self.z_dim = z_dim
         # also the paper doesn't mention this first convolution
+        # honestly not going to mess with this now because it doesn't seem like the most important thing
         self.conv1 = nn.Conv2d(nc, 32, kernel_size=3, stride=2, padding=1, bias=False)
         self.bn1 = nn.BatchNorm2d(32)
-        # TODO: I'm pretty sure there are 2x the layers here for each size
-        # nvm that's specified with numBlocks
-        self.layer1 = self._make_layer(BasicBlockEnc, 32, num_Blocks[0], stride=1)
+        # also try this again with the correct (starting with 64 and two 256 blocks)
+        self.layer1 = self._make_layer(BasicBlockEnc, 32, num_Blocks[0], stride=1) # this is expecting something of channel 32
         self.layer2 = self._make_layer(BasicBlockEnc, 64, num_Blocks[1], stride=2)
         self.layer3 = self._make_layer(BasicBlockEnc, 128, num_Blocks[2], stride=2)
-        self.layer4 = self._make_layer(BasicBlockEnc, 256, num_Blocks[3], stride=2)
+        self.layer4 = self._make_layer(BasicBlockEnc, 128, num_Blocks[3], stride=1)
         # do you need this linear layer at the end? I'm not sure
-        self.linear = nn.Linear(256, 2 * z_dim)
+        #self.linear = nn.Linear(256, 2 * z_dim)
 
     def _make_layer(self, BasicBlockEnc, planes, num_Blocks, stride):
         strides = [stride] + [1]*(num_Blocks-1)
@@ -113,7 +111,7 @@ class ResNet18Enc(nn.Module):
         return nn.Sequential(*layers)
 
     def forward(self, x):
-        x = torch.relu(self.bn1(self.conv1(x)))
+        x = self.bn1(torch.relu(self.conv1(x)))
         #print(x.shape)
         x = self.layer1(x)
         #print(x.shape)
@@ -122,26 +120,26 @@ class ResNet18Enc(nn.Module):
         x = self.layer3(x)
         #print(x.shape)
         x = self.layer4(x)
-        #print(x.shape)
-        x = F.adaptive_avg_pool2d(x, 1)
-        x = x.view(x.size(0), -1)
-        x = self.linear(x)
-        mu = x[:, :self.z_dim]
-        logvar = x[:, self.z_dim:]
+        #print('enc layer 4', x.shape)
+        x = F.adaptive_avg_pool2d(x, 1) # this sets it to [channel, 1, 1]
+        x = x.view(x.size(0), -1) # maybe I wanna keep this but remove the linear
+        #print('finished enc', x.shape)
+        #x = self.linear(x)
+        #mu = x[:, :self.z_dim]
+        #logvar = x[:, self.z_dim:]
         #print('mu', mu.shape)
         #print('logvar', logvar.shape)
-        return mu, logvar
+        return x # mu, logvar
 
 
 class ResNet18Dec(nn.Module):
-    def __init__(self, num_Blocks=[2,2,2,2], z_dim=10, nc=3):
+    def __init__(self, num_Blocks=[2,2,2,2], nc=3):
         super().__init__()
-        self.in_planes = 256
+        self.in_planes = 128
 
-        self.linear = nn.Linear(z_dim, 256)
+        #self.linear = nn.Linear(z_dim, 256)
 
-        # layer sizes are pretty different here to fit the paper, might be misunderstanding how this wroks
-        self.layer4 = self._make_layer(BasicBlockDec, 128, num_Blocks[3], stride=2)
+        self.layer4 = self._make_layer(BasicBlockDec, 128, num_Blocks[3], stride=1)
         self.layer3 = self._make_layer(BasicBlockDec, 64, num_Blocks[2], stride=2)
         self.layer2 = self._make_layer(BasicBlockDec, 32, num_Blocks[1], stride=2)
         self.layer1 = self._make_layer(BasicBlockDec, 32, num_Blocks[0], stride=1)
@@ -156,10 +154,11 @@ class ResNet18Dec(nn.Module):
         return nn.Sequential(*layers)
 
     def forward(self, z):
-        x = self.linear(z)
-        x = x.view(z.size(0), 256, 1, 1)
+        #x = self.linear(z)
+        #print('z', z.shape)
+        x = z.view(z.size(0), 128, 1, 1) #might not need this tbh
         #print('x.view decoder', x.shape)
-        x = F.interpolate(x, scale_factor=2)
+        x = F.interpolate(x, scale_factor=4)
         #print('x interpolate', x.shape)
         x = self.layer4(x)
         #print(x.shape)
@@ -168,7 +167,7 @@ class ResNet18Dec(nn.Module):
         x = self.layer2(x)
         #print(x.shape)
         x = self.layer1(x)
-        #print(x.shape)
+        #print('layer1 decoder', x.shape)
         x = torch.sigmoid(self.conv1(x))
         #print('x.conv resize', x.shape)
         x = x.view(x.size(0), 3, 32, 32)
@@ -176,21 +175,22 @@ class ResNet18Dec(nn.Module):
 
 # the other issue is that a U Net is mentioned but not described. I'm gonna leave
 # it out for now but it might make a big difference
-class BasicVAE(nn.Module):
-    def __init__(self, z_dim):
+class BasicAE(nn.Module):
+    def __init__(self):
         super().__init__()
-        self.encoder = ResNet18Enc(z_dim=z_dim)
-        self.decoder = ResNet18Dec(z_dim=z_dim)
+        self.encoder = ResNet18Enc()
+        self.decoder = ResNet18Dec()
 
     def forward(self, x):
-        mean, logvar = self.encoder(x)
-        z = self.reparameterize(mean, logvar)
+        # I'm changing this to just be an AE so it matches the architecture better
+        # still wondering if this is a U Net as well
+        z = self.encoder(x)
+        #z = self.reparameterize(mean, logvar)
         #print('z', z.shape)
         x = self.decoder(z)
-        return x, z
+        return x#, z
     
     @staticmethod
-    # why reparameterize?
     def reparameterize(mean, logvar):
         std = torch.exp(logvar / 2) # in log-space, squareroot is divide by two
         epsilon = torch.randn_like(std)

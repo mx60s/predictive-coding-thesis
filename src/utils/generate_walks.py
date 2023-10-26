@@ -1,22 +1,23 @@
-# originally from: https://github.com/microsoft/malmo/blob/master/MalmoEnv/video_run.py
+# modified from malmoenv video walk
 
 import malmoenv
 import argparse
 from pathlib import Path
 import time
 import gym
-from gym.wrappers.monitoring.video_recorder import VideoRecorder
+import datetime
+import random
+from PIL import Image
+import os
+import numpy as np
 
 import logging
 logging.basicConfig(level=logging.DEBUG)
 
-
-# do I need to 
-
 if __name__ == '__main__':
-
-    parser = argparse.ArgumentParser(description='malmovnv test')
-    parser.add_argument('--mission', type=str, default='envs/mission.xml', help='the mission xml')
+    
+    parser = argparse.ArgumentParser(description='malmoenv test')
+    parser.add_argument('--missionname', type=str, default='default', help='the mission xml')
     parser.add_argument('--port', type=int, default=9000, help='the mission server port')
     parser.add_argument('--server', type=str, default='127.0.0.1', help='the mission server DNS or IP address')
     parser.add_argument('--port2', type=int, default=None, help="(Multi-agent) role N's mission port. Defaults to server port.")
@@ -28,15 +29,17 @@ if __name__ == '__main__':
     parser.add_argument('--resync', type=int, default=0, help='exit and re-sync every N resets'
                                                               ' - default is 0 meaning never.')
     parser.add_argument('--experimentUniqueId', type=str, default='test1', help="the experiment's unique id.")
-    parser.add_argument('--video_path', type=str, default="video.mp4", help="Optional video path.")
-    # TODO can I just save the video as a sequence of images?
-    # should I be loading 
+    
     args = parser.parse_args()
     if args.server2 is None:
         args.server2 = args.server
 
-    xml = Path(args.mission).read_text()
+    mission_path = '../envs/' + args.missionname + '.xml'
+    
+    xml = Path(mission_path).read_text()
     env = malmoenv.make()
+
+    imgs_path = '../data/frames_' + args.missionname + '_' + datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
 
     env.init(xml, args.port,
              server=args.server,
@@ -47,21 +50,22 @@ if __name__ == '__main__':
              resync=args.resync,
              reshape=True)
 
-    rec = VideoRecorder(env, args.video_path)
-    # can I do this with malmoenv or does it need full malmo? agent_host.setVideoPolicy(MalmoPython.VideoPolicy.LATEST_FRAME_ONLY)
-    # or maybe it's literally just faster/easier to change mp4s into a string of images in the dataloader
-
+    actions = ["movenorth 1", "movesouth 1", "movewest 1", "moveeast 1"]
+    frames = []
     for i in range(args.episodes):
         print("reset " + str(i))
         obs = env.reset()
-        rec.capture_frame()
-
         steps = 0
         done = False
         while not done and (args.episodemaxsteps <= 0 or steps < args.episodemaxsteps):
-            action = env.action_space.sample()
-            rec.capture_frame()
-            obs, reward, done, info = env.step(action)
+            img = np.asarray(env.render(mode='rgb_array'))
+            frames.append(img)
+            
+            a = random.randint(0, len(actions) - 1)
+            action = actions[a]
+            logging.info("Random action: %s" % actions[a])
+            
+            obs, reward, done, info = env.step(a)
             steps += 1
             print("reward: " + str(reward))
             # print("done: " + str(done))
@@ -70,5 +74,8 @@ if __name__ == '__main__':
 
             time.sleep(.05)
 
-    rec.close()
+    if frames:
+        np_frames = np.stack(frames, axis=0 )
+        np.save(imgs_path, np_frames)
+    
     env.close()

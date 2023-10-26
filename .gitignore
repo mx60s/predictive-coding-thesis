@@ -4,3 +4,4 @@ src/etc/.ipynb_checkpoints
 src/utils/.ipynb_checkpoints
 src/data
 src/utils/__pycache__
+src/model_files
