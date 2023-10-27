@@ -10,9 +10,13 @@ import random
 from PIL import Image
 import os
 import numpy as np
+import timeit
 
 import logging
 logging.basicConfig(level=logging.DEBUG)
+
+
+# TODO change the env so it's 40 x 65, matches the described env, and also has A* traversal
 
 if __name__ == '__main__':
     
@@ -52,30 +56,42 @@ if __name__ == '__main__':
 
     actions = ["movenorth 1", "movesouth 1", "movewest 1", "moveeast 1"]
     frames = []
-    for i in range(args.episodes):
-        print("reset " + str(i))
-        obs = env.reset()
-        steps = 0
-        done = False
-        while not done and (args.episodemaxsteps <= 0 or steps < args.episodemaxsteps):
-            img = np.asarray(env.render(mode='rgb_array'))
-            frames.append(img)
-            
-            a = random.randint(0, len(actions) - 1)
-            action = actions[a]
-            logging.info("Random action: %s" % actions[a])
-            
-            obs, reward, done, info = env.step(a)
-            steps += 1
-            print("reward: " + str(reward))
-            # print("done: " + str(done))
-            print("obs: " + str(obs))
-            # print("info" + info)
 
-            time.sleep(.05)
-
-    if frames:
-        np_frames = np.stack(frames, axis=0 )
-        np.save(imgs_path, np_frames)
+    try:
+        tic=timeit.default_timer()
+        
+        for i in range(args.episodes):
+            print("reset " + str(i))
+            obs = env.reset()
+            steps = 0
+            done = False
+            while not done and (args.episodemaxsteps <= 0 or steps < args.episodemaxsteps):
+                img = np.asarray(env.render(mode='rgb_array'))
+                frames.append(img)
+                
+                a = random.randint(0, len(actions) - 1)
+                action = actions[a]
+                #logging.info("Random action: %s" % actions[a])
+                
+                obs, reward, done, info = env.step(a)
+                steps += 1
+                #print("reward: " + str(reward))
+                # print("done: " + str(done))
+                #print("obs: " + str(obs))
+                # print("info" + info)
     
-    env.close()
+                time.sleep(.05)
+    
+        toc=timeit.default_timer()
+        print(f'Elapsed time for {args.episodes} episodes and {args.episodemaxsteps} steps:{toc - tic}')
+
+    except Exception as e:
+        print("Failed to complete mission:", e)
+        print(f"Completed {i} episodes and {steps} steps")
+
+    finally:
+        if frames:
+            np_frames = np.stack(frames, axis=0 )
+            np.save(imgs_path, np_frames)
+
+        env.close()

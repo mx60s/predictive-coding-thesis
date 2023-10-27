@@ -58,7 +58,6 @@
                     <DrawBlock type="planks" x="40" y="9" z="27"/>
                     <DrawBlock type="planks" x="3" y="10" z="5"/>
                 </DrawingDecorator>
-                <ServerQuitFromTimeUp timeLimitMs="3000000" description="out_of_time"/>
             </ServerHandlers>
         </ServerSection>
 
@@ -72,8 +71,8 @@
                 <MissionQuitCommands/>
                 <ObservationFromFullStats/>
                 <VideoProducer want_depth="false">
-                   <Width>480</Width>
-                   <Height>320</Height>
+                   <Width>128</Width>
+                   <Height>128</Height>
                 </VideoProducer>
             </AgentHandlers>            
         </AgentSection>

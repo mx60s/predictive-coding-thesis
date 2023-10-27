@@ -2,7 +2,7 @@ import torch
 from torch import nn, optim
 import torch.nn.functional as F
 
-# TODO make a autoencoder and then switch to building out the envs
+# TODO need to contend with head direction happening 
 
 '''
 To perform predictive coding, we construct an encoderdecoder convolutional neural network with a ResNet18 architecture40 for the encoder and a corresponding ResNet-18 architecture with transposed convolutions in the decoder (Figure 1(b)). The encoder-decoder architecture uses the U-Net architecture41 to pass the encoded latent units into the decoder. Multi-headed attention processes the sequence of encoded latent units to encode the history of past visual observations. The multi-headed attention has ℎ = 8 heads. For the encoded latent units with dimension 𝐷 = 𝐶 × 𝐻 × 𝑊, the dimension 𝑑 of a single head is 𝑑 = 𝐶 × 𝐻 × 𝑊/ℎ. The predictive coder approximates predictive coding by minimizing the mean-squared error between the Pre-print |
@@ -88,16 +88,16 @@ class BasicBlockDec(nn.Module):
 class ResNet18Enc(nn.Module):
     def __init__(self, num_Blocks=[2,2,2,2], nc=3):
         super().__init__()
-        self.in_planes = 32
+        self.in_planes = 64
         # also the paper doesn't mention this first convolution
         # honestly not going to mess with this now because it doesn't seem like the most important thing
-        self.conv1 = nn.Conv2d(nc, 32, kernel_size=3, stride=2, padding=1, bias=False)
-        self.bn1 = nn.BatchNorm2d(32)
+        self.conv1 = nn.Conv2d(nc, 64, kernel_size=3, stride=2, padding=1, bias=False)
+        self.bn1 = nn.BatchNorm2d(64)
         # also try this again with the correct (starting with 64 and two 256 blocks)
-        self.layer1 = self._make_layer(BasicBlockEnc, 32, num_Blocks[0], stride=1) # this is expecting something of channel 32
-        self.layer2 = self._make_layer(BasicBlockEnc, 64, num_Blocks[1], stride=2)
-        self.layer3 = self._make_layer(BasicBlockEnc, 128, num_Blocks[2], stride=2)
-        self.layer4 = self._make_layer(BasicBlockEnc, 128, num_Blocks[3], stride=1)
+        self.layer1 = self._make_layer(BasicBlockEnc, 64, num_Blocks[0], stride=1) # this is expecting something of channel 32
+        self.layer2 = self._make_layer(BasicBlockEnc, 128, num_Blocks[1], stride=2)
+        self.layer3 = self._make_layer(BasicBlockEnc, 256, num_Blocks[2], stride=2)
+        self.layer4 = self._make_layer(BasicBlockEnc, 256, num_Blocks[3], stride=1)
         # do you need this linear layer at the end? I'm not sure
         #self.linear = nn.Linear(256, 2 * z_dim)
 
@@ -135,15 +135,15 @@ class ResNet18Enc(nn.Module):
 class ResNet18Dec(nn.Module):
     def __init__(self, num_Blocks=[2,2,2,2], nc=3):
         super().__init__()
-        self.in_planes = 128
+        self.in_planes = 256
 
         #self.linear = nn.Linear(z_dim, 256)
 
-        self.layer4 = self._make_layer(BasicBlockDec, 128, num_Blocks[3], stride=1)
-        self.layer3 = self._make_layer(BasicBlockDec, 64, num_Blocks[2], stride=2)
-        self.layer2 = self._make_layer(BasicBlockDec, 32, num_Blocks[1], stride=2)
-        self.layer1 = self._make_layer(BasicBlockDec, 32, num_Blocks[0], stride=1)
-        self.conv1 = ResizeConv2d(32, nc, kernel_size=3, scale_factor=2)
+        self.layer4 = self._make_layer(BasicBlockDec, 256, num_Blocks[3], stride=1)
+        self.layer3 = self._make_layer(BasicBlockDec, 128, num_Blocks[2], stride=2)
+        self.layer2 = self._make_layer(BasicBlockDec, 63, num_Blocks[1], stride=2)
+        self.layer1 = self._make_layer(BasicBlockDec, 64, num_Blocks[0], stride=1)
+        self.conv1 = ResizeConv2d(64, nc, kernel_size=3, scale_factor=2)
 
     def _make_layer(self, BasicBlockDec, planes, num_Blocks, stride):
         strides = [stride] + [1]*(num_Blocks-1)
@@ -156,7 +156,7 @@ class ResNet18Dec(nn.Module):
     def forward(self, z):
         #x = self.linear(z)
         #print('z', z.shape)
-        x = z.view(z.size(0), 128, 1, 1) #might not need this tbh
+        x = z.view(z.size(0), 256, 1, 1) #might not need this tbh
         #print('x.view decoder', x.shape)
         x = F.interpolate(x, scale_factor=4)
         #print('x interpolate', x.shape)
@@ -170,11 +170,30 @@ class ResNet18Dec(nn.Module):
         #print('layer1 decoder', x.shape)
         x = torch.sigmoid(self.conv1(x))
         #print('x.conv resize', x.shape)
-        x = x.view(x.size(0), 3, 32, 32)
+        x = x.view(x.size(0), 3, 64, 64)
         return x
+
+# putting this in its own class so I can expand later
+class MySelfAttention(nn.Module):
+    def __init__(self, embed_dim=128, heads=8):
+        super().__init__()
+
+        self.attn = nn.MultiheadAttention(embed_dim, heads, batch_first=True)
+
+    # there's a few additional conv blocks that are not described at all in the paper
+    # before and after the attention module. I hate this, so I'm just considering that
+    # the two convolutions that resnet does (conv1) are kind of what they might mean
+    def forward(self, x):
+        #print('before attn', x.shape)
+        out, out_weights = self.attn(x, x, x)
+        #print('out attn', out.shape)
+        #print('out weights', out_weights.shape)
+        
+        return out, out_weights
 
 # the other issue is that a U Net is mentioned but not described. I'm gonna leave
 # it out for now but it might make a big difference
+# also they say UNEt just to pass into decoder so maybe there's a specific way to do that
 class BasicAE(nn.Module):
     def __init__(self):
         super().__init__()
@@ -196,3 +215,20 @@ class BasicAE(nn.Module):
         epsilon = torch.randn_like(std)
         return epsilon * std + mean
 
+
+class SpatialAE(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.encoder = ResNet18Enc()
+        self.attn = MySelfAttention()
+        self.decoder = ResNet18Dec()
+
+    def forward(self, x):
+        # still wondering if this is a U Net as well
+        z = self.encoder(x)
+        #print('z type', type(z))
+        #print('z type', z.shape)
+        a_out, a_weights = self.attn(z)
+        
+        x = self.decoder(a_out)
+        return x
