@@ -10,7 +10,7 @@ class SequentialFrameDataset(Dataset):
     A dataset that provides sequences of frames in correct temporal order, plus the next step as the prediction target.
     Assumes input is a path to a numpy file containing a list of numpy arrays of size (3, 128, 128)
     """
-    def __init__(self, data, transform=None, seq_len=7, swap_axes=True):
+    def __init__(self, data, transform=None, seq_len=7):
         if isinstance(data, str):
             self.frames = np.load(data)
         elif isinstance(data, np.ndarray):
@@ -18,10 +18,7 @@ class SequentialFrameDataset(Dataset):
         else:
             raise Exception("Provide path to numpy file or numpy array.")
 
-        self.frames = np.transpose(self.frames, (0, 3, 1, 2))
-        print(self.frames.shape)
-        #if swap_axes:
-        #    self.frames = np.reshape(self.frames, (len(self.frames), 3, 128, 128))
+        #self.frames = np.transpose(self.frames, (0, 3, 1, 2))
         
         self.transform = transform
         self.seq_len = seq_len
@@ -33,17 +30,16 @@ class SequentialFrameDataset(Dataset):
     def __getitem__(self, idx):
         if torch.is_tensor(idx):
             idx = idx.tolist()
+            # do I even want this functionality with the concat?
 
         # I'm pretty sure that the dataloader will use len() to grab indexes for this but who knows
         # make more robust in the future
-
-        sequences = self.frames[idx:idx + self.seq_len]
+        long_img = np.concatenate(self.frames[idx:idx + self.seq_len], axis=1)
+        
         preds = self.frames[idx + self.seq_len + 1]
-
-        # with this, sequences is still a list for the record
+        
         if self.transform:
-            for i in range(self.seq_len):
-                sequences[i] = self.transform(sequences[i])
+            sequences = self.transform(long_img)
             preds = self.transform(preds)
         
         sample = [sequences, preds]
