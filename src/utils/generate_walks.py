@@ -15,8 +15,7 @@ import timeit
 import logging
 logging.basicConfig(level=logging.DEBUG)
 
-
-# TODO change the env so it's 40 x 65, matches the described env, and also has A* traversal
+from agents import AStarAgent
 
 if __name__ == '__main__':
     
@@ -54,8 +53,12 @@ if __name__ == '__main__':
              resync=args.resync,
              reshape=True)
 
+    original_pos = -35, -60, 4
+    pos = ((-84, -19), (-22, 22))
     actions = ["movenorth 1", "movesouth 1", "movewest 1", "moveeast 1"]
     frames = []
+    
+    agent = AStarAgent()
 
     try:
         tic=timeit.default_timer()
@@ -69,10 +72,12 @@ if __name__ == '__main__':
                 img = np.asarray(env.render(mode='rgb_array'))
                 frames.append(img)
                 
-                a = random.randint(0, len(actions) - 1)
-                action = actions[a]
-                #logging.info("Random action: %s" % actions[a])
+                a = agent.next_step()
+                #a = random.randint(0, len(actions) - 1)
+                #action = actions[a]
+                logging.info("Agent action: %s" % actions[a])
                 
+                # doublecheck why is this using a 1234 thing
                 obs, reward, done, info = env.step(a)
                 steps += 1
                 #print("reward: " + str(reward))

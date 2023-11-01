@@ -17,54 +17,14 @@
                 <Weather>clear</Weather>
             </ServerInitialConditions>
             <ServerHandlers>
-                <FlatWorldGenerator generatorString="3;1*minecraft:bedrock,7*minecraft:dirt,1*minecraft:grass,1*minecraft:tallgrass:2;4;"/>
-                <DrawingDecorator>
-                  <DrawBlock type="planks" x="19" y="9" z="18"/>
-                  <DrawBlock type="planks" x="19" y="9" z="20"/>
-                  <DrawBlock type="planks" x="18" y="9" z="18"/>
-                  <DrawBlock type="planks" x="18" y="9" z="20"/>
-                  <DrawBlock type="planks" x="20" y="9" z="18"/>
-                  <DrawBlock type="planks" x="20" y="9" z="19"/>
-                  <DrawBlock type="planks" x="20" y="9" z="20"/>
-                  
-                  <DrawBlock type="planks" x="19" y="10" z="18"/>
-                  <DrawBlock type="planks" x="19" y="10" z="20"/>
-                  <DrawBlock type="planks" x="18" y="10" z="18"/>
-                  <DrawBlock type="planks" x="18" y="10" z="20"/>
-                  <DrawBlock type="planks" x="20" y="10" z="18"/>
-                  <DrawBlock type="planks" x="20" y="10" z="19"/>
-                  <DrawBlock type="planks" x="20" y="10" z="20"/>        
-                  
-                  <DrawBlock type="planks" x="19" y="11" z="18"/>
-                  <DrawBlock type="planks" x="19" y="11" z="19"/>
-                  <DrawBlock type="planks" x="19" y="11" z="20"/>
-                  <DrawBlock type="planks" x="18" y="11" z="18"/>
-                  <DrawBlock type="planks" x="18" y="11" z="19"/>
-                  <DrawBlock type="planks" x="18" y="11" z="20"/>
-                  <DrawBlock type="planks" x="20" y="11" z="18"/>
-                  <DrawBlock type="planks" x="20" y="11" z="19"/>
-                  <DrawBlock type="planks" x="20" y="11" z="20"/>
-                  
-                  <DrawBlock type="planks" x="19" y="12" z="20"/>
-                    
-                  <DrawBlock type="planks" x="3" y="9" z="18"/>
-
-                    <DrawBlock type="planks" x="7" y="9" z="5"/>
-                    <DrawBlock type="planks" x="3" y="10" z="5"/>
-
-                    <DrawBlock type="planks" x="40" y="9" z="5"/>
-                    <DrawBlock type="planks" x="3" y="10" z="5"/>
-
-                    <DrawBlock type="planks" x="40" y="9" z="27"/>
-                    <DrawBlock type="planks" x="3" y="10" z="5"/>
-                </DrawingDecorator>
+                <FileWorldGenerator src="/Users/mvonebers/Library/Application Support/minecraft/saves/predcode2" forceReset="1"/> 
             </ServerHandlers>
         </ServerSection>
 
         <AgentSection mode="Survival">
             <Name>Agent0</Name>
             <AgentStart>
-                  <Placement pitch="0" x="0.5" y="9" yaw="0" z="0"/>
+                  <Placement pitch="0" x="-35" y="-60" yaw="0" z="4"/>
             </AgentStart>
             <AgentHandlers>
                 <ContinuousMovementCommands/>
