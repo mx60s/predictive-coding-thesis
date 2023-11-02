@@ -10,6 +10,22 @@ To perform predictive coding, we construct an encoderdecoder convolutional neura
 actual observation and its predicted observation. The predictive coder trains on 82, 630 samples for 200 epochs with gradient descent optimization with Nesterov momentum43, a weight decay of 5 × 10−6, and a learning rate of 10−1 adjusted by OneCycle learning rate scheduling44. The optimized predictive coder has to a mean-squared error between the predicted and actual images of 0.094 and a good visual fidelity (Figure 1(c)).
 '''
 
+
+class LocationPredictor(nn.Module):
+    """
+    A simple feedforward network which predicts the position of the agent from a set of latent variables
+    """
+    def __init__(self, input_dim=128, hidden_dim=200):
+        super().__init__()
+        self.layer1 = nn.Linear(input_dim, 200)
+        self.layer2 = nn.Linear(200, 2)
+        
+    def forward(self, x):
+        x = self.layer1(x)
+        x = self.layer2(x)
+        return x
+
+
 # arch from here: https://github.com/julianstastny/VAE-ResNet18-PyTorch/tree/master
 # with transposed convolutions subbed out -- may need to change that later
 
@@ -23,8 +39,7 @@ class ResizeConv2d(nn.Module):
     def forward(self, x):
         x = F.interpolate(x, scale_factor=self.scale_factor, mode=self.mode)
         x = self.conv(x)
-        return x
-
+        return x    
 
 class BasicBlockEnc(nn.Module):
     def __init__(self, in_planes, stride=1):
@@ -48,9 +63,7 @@ class BasicBlockEnc(nn.Module):
     def forward(self, x):
         # some modifications from source code to fit the paper's description
         out = self.bn1(torch.relu(self.conv1(x)))
-        #print('after block 1', out.shape)
         out = self.bn2(torch.relu(self.conv2(out)))
-        #print('after block 2', out.shape)
         out += self.shortcut(x)
         out = torch.relu(out)
         return out
@@ -93,53 +106,41 @@ class ResNet18Enc(nn.Module):
         # honestly not going to mess with this now because it doesn't seem like the most important thing
         self.conv1 = nn.Conv2d(nc, 128, kernel_size=3, stride=2, padding=1, bias=False)
         self.bn1 = nn.BatchNorm2d(128)
-        # also try this again with the correct (starting with 64 and two 256 blocks)
-        self.layer1 = self._make_layer(BasicBlockEnc, 128, num_Blocks[0], stride=1) # this is expecting something of channel 32
+        self.layer1 = self._make_layer(BasicBlockEnc, 128, num_Blocks[0], stride=1)
         self.layer2 = self._make_layer(BasicBlockEnc, 256, num_Blocks[1], stride=2)
         self.layer3 = self._make_layer(BasicBlockEnc, 512, num_Blocks[2], stride=2)
         self.layer4 = self._make_layer(BasicBlockEnc, 512, num_Blocks[3], stride=1)
-        # do you need this linear layer at the end? I'm not sure
-        #self.linear = nn.Linear(256, 2 * z_dim)
 
     def _make_layer(self, BasicBlockEnc, planes, num_Blocks, stride):
         strides = [stride] + [1]*(num_Blocks-1)
         layers = []
         for stride in strides:
             layers += [BasicBlockEnc(self.in_planes, stride)]
-            # so the first layer will have 2 basicblockenc layers, the first with planes=32 the second 128
             self.in_planes = planes
         return nn.Sequential(*layers)
 
     def forward(self, x):
         x = self.bn1(torch.relu(self.conv1(x)))
-        #print(x.shape)
         x = self.layer1(x)
-        #print(x.shape)
         x = self.layer2(x)
-        #print(x.shape)
         x = self.layer3(x)
-        #print(x.shape)
         x = self.layer4(x)
-        #print('enc layer 4', x.shape)
-        #x = F.adaptive_avg_pool2d(x, 1) # this sets it to [channel, 1, 1]
-        x = x.view(x.size(0), -1) # maybe I wanna keep this but remove the linear
-        #print('finished enc', x.shape)
-        #x = self.linear(x)
-        #mu = x[:, :self.z_dim]
-        #logvar = x[:, self.z_dim:]
-        #print('mu', mu.shape)
-        #print('logvar', logvar.shape)
-        return x # mu, logvar
+        
+        x = F.adaptive_avg_pool2d(x, 1) # this sets it to [channel, 1, 1]
+        x = x.view(x.size(0), -1)
+        return x 
 
 
 class ResNet18Dec(nn.Module):
-    def __init__(self, num_Blocks=[2,2,2,2], nc=3):
+    def __init__(self, z_dim=128, num_Blocks=[2,2,2,2], nc=3):
         super().__init__()
-        self.in_planes = 512
+        self.in_planes = 1024
 
-        #self.linear = nn.Linear(z_dim, 256)
+        # this is set so high so you can have the first stride=2, so it expands the H,W dims more
+        # accurate to the referenced ResNet
+        self.linear = nn.Linear(z_dim, 1024)
 
-        self.layer4 = self._make_layer(BasicBlockDec, 512, num_Blocks[3], stride=1)
+        self.layer4 = self._make_layer(BasicBlockDec, 512, num_Blocks[3], stride=2)
         self.layer3 = self._make_layer(BasicBlockDec, 256, num_Blocks[2], stride=2)
         self.layer2 = self._make_layer(BasicBlockDec, 128, num_Blocks[1], stride=2)
         self.layer1 = self._make_layer(BasicBlockDec, 128, num_Blocks[0], stride=1)
@@ -153,43 +154,34 @@ class ResNet18Dec(nn.Module):
         self.in_planes = planes
         return nn.Sequential(*layers)
 
-    def forward(self, z):
-        #x = self.linear(z)
-        #print('z', z.shape)
-        x = z.view(z.size(0), 256, 1, 1) #might not need this tbh
-        #print('x.view decoder', x.shape)
-        x = F.interpolate(x, scale_factor=4)
-        #print('x interpolate', x.shape)
+    # feels bad to interpolate up so much. Should I try to just run this on 64x64 imgs instead?
+    def forward(self, x):
+        x = self.linear(x)
+        x = x.view(x.size(0), 1024, 1, 1)
+        x = F.interpolate(x, scale_factor=8)
         x = self.layer4(x)
-        #print(x.shape)
         x = self.layer3(x)
-        #print(x.shape)
         x = self.layer2(x)
-        #print(x.shape)
         x = self.layer1(x)
-        #print('layer1 decoder', x.shape)
         x = torch.sigmoid(self.conv1(x))
-        #print('x.conv resize', x.shape)
-        x = x.view(x.size(0), 3, 64, 64)
+        x = x.view(x.size(0), 3, 128, 128)
         return x
 
-# putting this in its own class so I can expand later
+# TODO is causal???
 class MySelfAttention(nn.Module):
-    def __init__(self, embed_dim=128, heads=8):
+    def __init__(self, latent_dim, embed_dim=128, heads=8):
         super().__init__()
-
+        self.conv1 = nn.Conv1d(7, 7, kernel_size=3, stride=4) # contract from [7, 512] to [7, 128]
         self.attn = nn.MultiheadAttention(embed_dim, heads, batch_first=True)
+        # specifically in the paper they say that this is a conv but...
+        # no matter what, the prediction is just a 1D vector
+        # so does it make most sense to do a linear ff 
 
-    # there's a few additional conv blocks that are not described at all in the paper
-    # before and after the attention module. I hate this, so I'm just considering that
-    # the two convolutions that resnet does (conv1) are kind of what they might mean
     def forward(self, x):
-        #print('before attn', x.shape)
-        out, out_weights = self.attn(x, x, x)
-        #print('out attn', out.shape)
-        #print('out weights', out_weights.shape)
+        x = self.conv1(x)
+        out_attn, _ = self.attn(x, x, x, need_weights=False)
         
-        return out, out_weights
+        return out_attn[:, -1, :]
 
 # the other issue is that a U Net is mentioned but not described. I'm gonna leave
 # it out for now but it might make a big difference
@@ -204,31 +196,23 @@ class BasicAE(nn.Module):
         # I'm changing this to just be an AE so it matches the architecture better
         # still wondering if this is a U Net as well
         z = self.encoder(x)
-        #z = self.reparameterize(mean, logvar)
-        #print('z', z.shape)
         x = self.decoder(z)
         return x#, z
-    
-    @staticmethod
-    def reparameterize(mean, logvar):
-        std = torch.exp(logvar / 2) # in log-space, squareroot is divide by two
-        epsilon = torch.randn_like(std)
-        return epsilon * std + mean
 
 
-class SpatialAE(nn.Module):
+class PredictiveCoder(nn.Module):
     def __init__(self):
         super().__init__()
         self.encoder = ResNet18Enc()
-        self.attn = MySelfAttention()
+        self.attn = MySelfAttention(512)
         self.decoder = ResNet18Dec()
 
     def forward(self, x):
         # still wondering if this is a U Net as well
-        z = self.encoder(x)
-        #print('z type', type(z))
-        #print('z type', z.shape)
-        a_out, a_weights = self.attn(z)
+        encoded_frames = [self.encoder(frame.squeeze(1)) for frame in x.split(1, dim=1)]
+        encoded_frames = torch.stack(encoded_frames, dim=1).squeeze(2)
         
-        x = self.decoder(a_out)
-        return x
+        z = self.attn(encoded_frames)
+        
+        pred = self.decoder(z)
+        return pred
