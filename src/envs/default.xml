@@ -17,17 +17,46 @@
                 <Weather>clear</Weather>
             </ServerInitialConditions>
             <ServerHandlers>
-                <FileWorldGenerator src="/Users/mvonebers/Library/Application Support/minecraft/saves/predcode2" forceReset="1"/> 
+		    <FileWorldGenerator src="/home/maggie/predictive-coding-thesis/src/envs/mcworld" forceReset="1"/> 
+            <DrawingDecorator>
+                <DrawBlock type="planks" x="-432" y="4" z="-663"/>
+                <DrawBlock type="planks" x="-432" y="5" z="-663"/>
+                <DrawBlock type="planks" x="-432" y="6" z="-663"/>
+                <DrawBlock type="planks" x="-432" y="7" z="-663"/>
+                <DrawBlock type="planks" x="-432" y="8" z="-663"/>
+                <DrawBlock type="planks" x="-432" y="9" z="-663"/>
+                <DrawBlock type="planks" x="-432" y="10" z="-663"/>
+
+                <DrawBlock type="planks" x="-480" y="4" z="-663"/>
+                <DrawBlock type="planks" x="-480" y="5" z="-663"/>
+                <DrawBlock type="planks" x="-480" y="6" z="-663"/>
+                <DrawBlock type="planks" x="-480" y="7" z="-663"/>
+
+                <DrawBlock type="planks" x="-480" y="4" z="-683"/>
+                <DrawBlock type="planks" x="-480" y="5" z="-683"/>
+                <DrawBlock type="planks" x="-480" y="6" z="-683"/>
+                <DrawBlock type="planks" x="-481" y="7" z="-683"/>
+                <DrawBlock type="planks" x="-482" y="8" z="-663"/>
+                <DrawBlock type="planks" x="-483" y="9" z="-663"/>
+
+                <DrawBlock type="planks" x="-432" y="4" z="-675"/>
+                <DrawBlock type="planks" x="-432" y="5" z="-675"/>
+
+                <DrawBlock type="planks" x="-450" y="4" z="-675"/>
+                <DrawBlock type="planks" x="-450" y="5" z="-675"/>
+                <DrawBlock type="planks" x="-451" y="5" z="-675"/>
+                
+            </DrawingDecorator>
             </ServerHandlers>
         </ServerSection>
 
         <AgentSection mode="Survival">
             <Name>Agent0</Name>
             <AgentStart>
-                  <Placement pitch="0" x="-35" y="-60" yaw="0" z="4"/>
+                  <Placement pitch="0" x="-451.5" y="4" yaw="0" z="-671.5"/>
             </AgentStart>
             <AgentHandlers>
-                <ContinuousMovementCommands/>
+                <DiscreteMovementCommands/>
                 <MissionQuitCommands/>
                 <ObservationFromFullStats/>
                 <VideoProducer want_depth="false">

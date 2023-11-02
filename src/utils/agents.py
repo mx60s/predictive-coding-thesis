@@ -2,31 +2,42 @@ import malmoenv
 import gym
 import heapq
 import random
-from typing import Tuple
+import math
+from typing import Tuple, List
 
 class AStarAgent:
     """
     An agent which comes up with random paths throughout the environment, and then generates the 
     actions via A* to traverse them.
     """
-    def __init__(self, start_pos: Tuple, bounds: Tuple):
+    def __init__(self, start_pos: Tuple, bounds: Tuple, obstacles: List):
         self.x, self.y, self.z = start_pos
-        self.x_bound = start_pos[0]
-        self.z_bound = start_pos[1]
+        self.obstacles = obstacles
+        self.x_bound = bounds[0]
+        self.z_bound = bounds[1]
         self.target = None
-        self.path = []
-    
+        self.steps = 0
+
+    # this isn't perfect, also need to check overhanging things
     def _is_obstacle(self, x, y, z):
-        
+        x_f = math.floor(self.x)
+        z_f = math.floor(self.z)
+        for o in self.obstacles:
+            if x_f == o[0] and z_f == o[1]:
+                #print('obstacle at', o)
+                return True
         return False
     
     def _generate_target(self):
         while True:
-            x = random.randint(self.x_bound[0], self.x_bound[1])
-            z = random.randint(self.z_bound[0], self.z_bound[1])
-            if not self._is_obstacle(x, self.y, z):
+            x = random.randint(self.x_bound[0], self.x_bound[1]) + 0.5
+            z = random.randint(self.z_bound[0], self.z_bound[1]) + 0.5
+            dist = abs(x - self.x) + abs(z - self.z)
+            #print('dist', dist)
+            if dist >= 5 and not self._is_obstacle(x, self.y, z):
                 self.target = (x, self.y, z)
                 break
+        print('target', self.target)
     
     def _heuristic(self, a, b):
         return abs(a[0] - b[0]) + abs(a[2] - b[2])
@@ -56,30 +67,34 @@ class AStarAgent:
                     priority = new_cost + self._heuristic(goal, neighbor)
                     heapq.heappush(frontier, (priority, neighbor))
                     came_from[neighbor] = current
-        
-        # Reconstruct path
-        self.path = []
+
         current = goal
-        while current != start:
-            self.path.append(current)
+        next_step = None
+        while current in came_from and came_from[current] is not None:
+            next_step = current
             current = came_from[current]
-        self.path.reverse()
+
+        return next_step
     
     def next_step(self):
-        if not self.path and not self.target:
+        if not self.target or self.steps > 10:# or self.target == (self.x, self.y, self.z):
+            print('stuck, recalculating')
             self._generate_target()
-            self._a_star_search()
+            self.steps = 0
         
-        if not self.path and self.target:
+        next_point = self._a_star_search()
+        
+        if not next_point:
             self._generate_target()
-            self._a_star_search()
-        
-        next_point = self.path.pop(0)
-        self.x, self.y, self.z = next_point
+            next_point = self._a_star_search()
         
         # Translate point to action
         dx = next_point[0] - self.x
         dz = next_point[2] - self.z
+        print('dx dz', dx, dz)
+
+        self.steps += 1
+        
         if dx == 1:
             return 3
         elif dx == -1:
@@ -88,3 +103,5 @@ class AStarAgent:
             return 0
         elif dz == -1:
             return 1
+        else:
+            self.steps -= 1

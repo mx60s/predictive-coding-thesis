@@ -11,11 +11,16 @@ from PIL import Image
 import os
 import numpy as np
 import timeit
-
+import math
+import json
 import logging
 logging.basicConfig(level=logging.DEBUG)
 
 from agents import AStarAgent
+
+def extract_real_pos(info):
+    info_dict = json.loads(info)
+    return float(info_dict['XPos']), float(info_dict['ZPos'])
 
 if __name__ == '__main__':
     
@@ -53,12 +58,15 @@ if __name__ == '__main__':
              resync=args.resync,
              reshape=True)
 
-    original_pos = -35, -60, 4
-    pos = ((-84, -19), (-22, 22))
+    original_pos = -451.5, 4, -671.5 
+    bounds = ((-484, -427), (-694, -658))
     actions = ["movenorth 1", "movesouth 1", "movewest 1", "moveeast 1"]
     frames = []
+
+    # come up with a way to directly import this from the xml file
+    obstacles = [(-432, -664), (-480, -663), (-480, -683), (-481, -683), (-432, -675), (-450, -675), (-451, -675)]
     
-    agent = AStarAgent()
+    agent = AStarAgent(original_pos, bounds, obstacles)
 
     try:
         tic=timeit.default_timer()
@@ -71,32 +79,32 @@ if __name__ == '__main__':
             while not done and (args.episodemaxsteps <= 0 or steps < args.episodemaxsteps):
                 img = np.asarray(env.render(mode='rgb_array'))
                 frames.append(img)
-                
+
                 a = agent.next_step()
-                #a = random.randint(0, len(actions) - 1)
-                #action = actions[a]
-                logging.info("Agent action: %s" % actions[a])
+                #logging.info("Agent action: %s" % actions[a])
                 
                 # doublecheck why is this using a 1234 thing
+                print('belief position:', agent.x, agent.z)
                 obs, reward, done, info = env.step(a)
+                #print('info:', info[183:224])
+                if info:
+                    #print(info)
+                    agent.x, agent.z = extract_real_pos(info)
+                print('new pos', agent.x, agent.z)
                 steps += 1
-                #print("reward: " + str(reward))
-                # print("done: " + str(done))
-                #print("obs: " + str(obs))
-                # print("info" + info)
     
-                time.sleep(.05)
+                time.sleep(.5)
     
         toc=timeit.default_timer()
         print(f'Elapsed time for {args.episodes} episodes and {args.episodemaxsteps} steps:{toc - tic}')
 
-    except Exception as e:
-        print("Failed to complete mission:", e)
-        print(f"Completed {i} episodes and {steps} steps")
+    #except Exception as e:
+    #    print("Failed to complete mission:", e)
+    #    print(f"Completed {i} episodes and {steps} steps")
 
     finally:
-        if frames:
-            np_frames = np.stack(frames, axis=0 )
-            np.save(imgs_path, np_frames)
+    #    if frames:
+    #        np_frames = np.stack(frames, axis=0 )
+    #        np.save(imgs_path, np_frames)
 
         env.close()
