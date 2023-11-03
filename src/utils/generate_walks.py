@@ -58,13 +58,13 @@ if __name__ == '__main__':
              resync=args.resync,
              reshape=True)
 
-    original_pos = -451.5, 4, -671.5 
+    original_pos = -451.5, 4, -671.5 # floored for my agent
     bounds = ((-484, -427), (-694, -658))
     actions = ["movenorth 1", "movesouth 1", "movewest 1", "moveeast 1"]
     frames = []
 
     # come up with a way to directly import this from the xml file
-    obstacles = [(-432, -664), (-480, -663), (-480, -683), (-481, -683), (-432, -675), (-450, -675), (-451, -675)]
+    obstacles = [(-432.5, -664.5), (-480.5, -663.5), (-480.5, -683.5), (-481.5, -683.5), (-432.5, -675.5), (-450.5, -675.5), (-451.5, -675.5)]
     
     agent = AStarAgent(original_pos, bounds, obstacles)
 
@@ -76,6 +76,8 @@ if __name__ == '__main__':
             obs = env.reset()
             steps = 0
             done = False
+            last_place = original_pos
+            repeat_count = 0
             while not done and (args.episodemaxsteps <= 0 or steps < args.episodemaxsteps):
                 img = np.asarray(env.render(mode='rgb_array'))
                 frames.append(img)
@@ -84,13 +86,26 @@ if __name__ == '__main__':
                 #logging.info("Agent action: %s" % actions[a])
                 
                 # doublecheck why is this using a 1234 thing
-                print('belief position:', agent.x, agent.z)
+                #print('prev position:', agent.x, agent.z)
+                #print('a', a)
                 obs, reward, done, info = env.step(a)
                 #print('info:', info[183:224])
                 if info:
                     #print(info)
                     agent.x, agent.z = extract_real_pos(info)
-                print('new pos', agent.x, agent.z)
+                #print('new pos', agent.x, agent.z)
+                
+                if (agent.x, agent.y, agent.z) == last_place:
+                    repeat_count += 1
+                    #print('repeat')
+                    if (repeat_count > 4):
+                        #print('generating new target bc repeats')
+                        agent._generate_target()
+                        repeat_count = 0
+                else:
+                    repeat_count = 0
+                    last_place = (agent.x, agent.y, agent.z)
+
                 steps += 1
     
                 time.sleep(.5)
@@ -98,13 +113,13 @@ if __name__ == '__main__':
         toc=timeit.default_timer()
         print(f'Elapsed time for {args.episodes} episodes and {args.episodemaxsteps} steps:{toc - tic}')
 
-    #except Exception as e:
-    #    print("Failed to complete mission:", e)
-    #    print(f"Completed {i} episodes and {steps} steps")
+    except Exception as e:
+        print("Failed to complete mission:", e)
+        print(f"Completed {i} episodes and {steps} steps")
 
     finally:
-    #    if frames:
-    #        np_frames = np.stack(frames, axis=0 )
-    #        np.save(imgs_path, np_frames)
+        if frames:
+            np_frames = np.stack(frames, axis=0 )
+            np.save(imgs_path, np_frames)
 
         env.close()
