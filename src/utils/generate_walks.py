@@ -49,6 +49,8 @@ if __name__ == '__main__':
 
     imgs_path = '../data/frames_' + args.missionname + '_' + datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
 
+    coords_path = '../data/coords_' + args.missionname + '_' + datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
+
     env.init(xml, args.port,
              server=args.server,
              server2=args.server2, port2=args.port2,
@@ -58,10 +60,10 @@ if __name__ == '__main__':
              resync=args.resync,
              reshape=True)
 
-    original_pos = -451.5, 4, -671.5 # floored for my agent
+    original_pos = -451.5, 4, -671.5 
     bounds = ((-484, -427), (-694, -658))
     actions = ["movenorth 1", "movesouth 1", "movewest 1", "moveeast 1"]
-    frames = []
+    frames, coords = [], [np.array(original_pos)]
 
     # come up with a way to directly import this from the xml file
     obstacles = [(-432.5, -664.5), (-480.5, -663.5), (-480.5, -683.5), (-481.5, -683.5), (-432.5, -675.5), (-450.5, -675.5), (-451.5, -675.5)]
@@ -95,6 +97,8 @@ if __name__ == '__main__':
                     agent.x, agent.z = extract_real_pos(info)
                 #print('new pos', agent.x, agent.z)
                 
+                coords.append((agent.x, agent.y, agent.z))
+
                 if (agent.x, agent.y, agent.z) == last_place:
                     repeat_count += 1
                     #print('repeat')
@@ -121,5 +125,8 @@ if __name__ == '__main__':
         if frames:
             np_frames = np.stack(frames, axis=0 )
             np.save(imgs_path, np_frames)
+
+            np_coords = np.stack(coords, axis=0)
+            np.save(coords_path, np_coords)
 
         env.close()
