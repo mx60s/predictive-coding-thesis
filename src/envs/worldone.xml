@@ -1,0 +1,45 @@
+<?xml version="1.0"?>
+    <Mission xmlns="http://ProjectMalmo.microsoft.com" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+        <About>
+            <Summary>Paper env</Summary>
+        </About>
+
+        <ModSettings>
+            <MsPerTick>50</MsPerTick>
+        </ModSettings>
+
+        <ServerSection>
+            <ServerInitialConditions>
+                <Time>
+                    <StartTime>6000</StartTime>
+                    <AllowPassageOfTime>false</AllowPassageOfTime>
+                </Time>
+                <Weather>clear</Weather>
+            </ServerInitialConditions>
+            <ServerHandlers>
+		    <FileWorldGenerator src="/home/maggie/predictive-coding-thesis/src/envs/mcworldfinished" forceReset="1"/> 
+            </ServerHandlers>
+        </ServerSection>
+
+        <AgentSection mode="Survival">
+            <Name>Agent0</Name>
+            <AgentStart>
+                  <Placement pitch="0" x="-454.5" y="4" yaw="0" z="-658.5"/>
+            </AgentStart>
+            <AgentHandlers>
+                <ObservationFromGrid>
+                    <Grid absoluteCoords="true" name="floor">
+                    <min x="-484" y="3" z="-694"/>
+                    <max x="-427" y="3" z="-658"/>
+                    </Grid>
+                </ObservationFromGrid>
+                <DiscreteMovementCommands/>
+                <MissionQuitCommands/>
+                <ObservationFromFullStats/>
+                <VideoProducer want_depth="false">
+                   <Width>128</Width>
+                   <Height>128</Height>
+                </VideoProducer>
+            </AgentHandlers>            
+        </AgentSection>
+</Mission>

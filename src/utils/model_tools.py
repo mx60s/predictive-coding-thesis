@@ -2,58 +2,128 @@ import torch
 import torchmetrics
 import numpy as np
 from torch.utils.data import Dataset
+import os
 
 # thank you Marlan
 
-import torch
-import torchmetrics
-import numpy as np
-from torch.utils.data import Dataset
+def map_files_to_chunks(source_directory, target_directory, file_start, seq_len):
+    print('Indexing files to', target_directory)
+    os.makedirs(target_directory)
 
-# thank you Marlan
+    file_index = 0
+    for filename in os.listdir(source_directory):
+        if filename.startswith(file_start):
+            filepath = os.path.join(source_directory, filename)
+            data = np.load(filepath, mmap_mode='r')
+    
+            for i in range(len(data) - (seq_len + 1)):
+                chunk = data[i:i + seq_len + 1]
+                chunk_fp = os.path.join(target_directory, f'{file_index}.npy')
+                np.save(chunk_fp, chunk)
+                file_index += 1
+    
+            del data
+
+    return file_index
 
 class SequentialFrameDataset(Dataset):
     """
     A dataset that provides sequences of frames in correct temporal order, plus the next step as the prediction target.
     Assumes input is a path to a numpy file containing a list of numpy arrays of size (3, 128, 128)
     """
-    def __init__(self, data, transform=None, seq_len=7, swap_axes=True):
-        if isinstance(data, str):
-            self.frames = np.load(data)
-        elif isinstance(data, np.ndarray):
-            self.frames = data
-        else:
-            raise Exception("Provide path to numpy file or numpy array.")
+    def __init__(self, source_directory, target_directory_name, transform=None, seq_len=7):
+        target_directory = os.path.join(source_directory, target_directory_name)
         
+        if not os.path.exists(target_directory):
+            self.length = map_files_to_chunks(source_directory, target_directory, 'frames_', seq_len)
+        else:
+            print("Assuming already indexed files in", target_directory)
+            self.length = len([name for name in os.listdir(target_directory)])
+        
+        self.data_directory = target_directory
         self.transform = transform
         self.seq_len = seq_len
         
     def __len__(self):
-        # As many possible overlapping sequences of specified length, plus their "predictions"
-        return (len(self.frames) // (self.seq_len + 1)) - self.seq_len
+        return self.length
 
     def __getitem__(self, idx):
         if torch.is_tensor(idx):
             idx = idx.tolist()
 
-        # I'm pretty sure that the dataloader will use len() to grab indexes for this but who knows
-        # make more robust in the future
+        # will this work with multiple idx? does it need to?
+        filename = self.data_directory + '/' + str(idx) + '.npy'
+        sample = np.load(filename)
+        sequence = sample[:-1]
+        pred = sample[-1]
 
-        sequences = self.frames[idx:idx + self.seq_len]
-        preds = self.frames[idx + self.seq_len + 1]
+        del sample
+
         seq_list = []
-        # with this, sequences is still a list for the record
+
         if self.transform:
             for i in range(self.seq_len):
-                seq_list.append(self.transform(sequences[i]))
-            preds = self.transform(preds)
+                seq_list.append(self.transform(sequence[i]))
+            pred = self.transform(pred)
         
         seq_tensor = torch.stack(seq_list)
         
-        sample = [seq_tensor, preds]
+        sample = [seq_tensor, pred]
         
         return sample
+
+class CoordinateDataset(Dataset):
+    """
+    Essentially the same as the sequential frame dataset, but this time the prediction will be the 
+    ground-truth coordinates of the agent for the predicted next frame.
+    """
+    def __init__(self, source_directory, target_directory_name, transform=None, seq_len=7):
+        target_dir_frames = os.path.join(source_directory, target_directory_name, 'frames')
+        target_dir_coords = os.path.join(source_directory, target_directory_name, 'coords')
+        if not os.path.exists(target_dir_frames):
+            self.length = map_files_to_chunks(source_directory, target_dir_frames, 'frames_', seq_len)
+        else:
+            print("Assuming already indexed frame files in", target_dir_frames)
+            self.length = len([name for name in os.listdir(target_dir_frames)])
+            
+        if not os.path.exists(target_dir_coords):
+            map_files_to_chunks(source_directory, target_dir_coords, 'coords_', seq_len)
+        else:
+            print("Assuming already indexed coords files in", target_dir_coords)
         
+        self.frames_directory = target_dir_frames
+        self.coords_directory = target_dir_coords
+        self.transform = transform
+        self.seq_len = seq_len 
+
+    def __len__(self):
+        return self.length
+
+    def __getitem__(self, idx):
+        if torch.is_tensor(idx):
+            idx = idx.tolist()
+
+        frame_file = self.frames_directory + '/' + str(idx) + '.npy'
+        coords_file = self.coords_directory + '/' + str(idx) + '.npy'
+        frames = np.load(frame_file)
+        coords = np.load(coords_file)
+        sequence = frames[:-1]
+        pred = coords[-1]
+
+        del sample
+
+        seq_list = []
+        if self.transform:
+            for i in range(self.seq_len):
+                seq_list.append(self.transform(sequence[i]))
+        
+        seq_tensor = torch.stack(seq_list)
+        pred_tensor = torch.tensor(pred)
+        
+        sample = [seq_tensor, pred_tensor]
+        
+        return sample
+
 
 def train(dataloader, model, loss_fn, optimizer, device) -> float:
     size = len(dataloader.dataset)

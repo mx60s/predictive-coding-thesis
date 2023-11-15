@@ -10,6 +10,7 @@ To perform predictive coding, we construct an encoderdecoder convolutional neura
 actual observation and its predicted observation. The predictive coder trains on 82, 630 samples for 200 epochs with gradient descent optimization with Nesterov momentum43, a weight decay of 5 × 10−6, and a learning rate of 10−1 adjusted by OneCycle learning rate scheduling44. The optimized predictive coder has to a mean-squared error between the predicted and actual images of 0.094 and a good visual fidelity (Figure 1(c)).
 '''
 
+device = 'cuda'
 
 class LocationPredictor(nn.Module):
     """
@@ -120,6 +121,7 @@ class ResNet18Enc(nn.Module):
         return nn.Sequential(*layers)
 
     def forward(self, x):
+        print('start enc', torch.cuda.memory_allocated(device))
         x = self.bn1(torch.relu(self.conv1(x)))
         x = self.layer1(x)
         x = self.layer2(x)
@@ -128,6 +130,7 @@ class ResNet18Enc(nn.Module):
         
         x = F.adaptive_avg_pool2d(x, 1) # this sets it to [channel, 1, 1]
         x = x.view(x.size(0), -1)
+        print('end enc', torch.cuda.memory_allocated(device))
         return x 
 
 
@@ -156,6 +159,7 @@ class ResNet18Dec(nn.Module):
 
     # feels bad to interpolate up so much. Should I try to just run this on 64x64 imgs instead?
     def forward(self, x):
+        print('start dec', torch.cuda.memory_allocated(device))
         x = self.linear(x)
         x = x.view(x.size(0), 1024, 1, 1)
         x = F.interpolate(x, scale_factor=8)
@@ -165,11 +169,12 @@ class ResNet18Dec(nn.Module):
         x = self.layer1(x)
         x = torch.sigmoid(self.conv1(x))
         x = x.view(x.size(0), 3, 128, 128)
+        print('end dec', torch.cuda.memory_allocated(device))
         return x
 
 # TODO is causal???
 class MySelfAttention(nn.Module):
-    def __init__(self, latent_dim, embed_dim=128, heads=8):
+    def __init__(self, embed_dim=128, heads=8):
         super().__init__()
         self.conv1 = nn.Conv1d(7, 7, kernel_size=3, stride=4) # contract from [7, 512] to [7, 128]
         self.attn = nn.MultiheadAttention(embed_dim, heads, batch_first=True)
@@ -178,14 +183,12 @@ class MySelfAttention(nn.Module):
         # so does it make most sense to do a linear ff 
 
     def forward(self, x):
+        print('start attn', torch.cuda.memory_allocated(device))
         x = self.conv1(x)
         out_attn, _ = self.attn(x, x, x, need_weights=False)
-        
+        print('out attn', torch.cuda.memory_allocated(device))
         return out_attn[:, -1, :]
 
-# the other issue is that a U Net is mentioned but not described. I'm gonna leave
-# it out for now but it might make a big difference
-# also they say UNEt just to pass into decoder so maybe there's a specific way to do that
 class BasicAE(nn.Module):
     def __init__(self):
         super().__init__()
@@ -204,11 +207,10 @@ class PredictiveCoder(nn.Module):
     def __init__(self):
         super().__init__()
         self.encoder = ResNet18Enc()
-        self.attn = MySelfAttention(512)
+        self.attn = MySelfAttention()
         self.decoder = ResNet18Dec()
 
     def forward(self, x):
-        # still wondering if this is a U Net as well
         encoded_frames = [self.encoder(frame.squeeze(1)) for frame in x.split(1, dim=1)]
         encoded_frames = torch.stack(encoded_frames, dim=1).squeeze(2)
         

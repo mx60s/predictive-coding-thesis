@@ -60,15 +60,13 @@ if __name__ == '__main__':
              resync=args.resync,
              reshape=True)
 
-    original_pos = -451.5, 4, -671.5 
+    original_pos = -451.5, 4, -671.5
     bounds = ((-484, -427), (-694, -658))
     actions = ["movenorth 1", "movesouth 1", "movewest 1", "moveeast 1"]
     frames, coords = [], [np.array(original_pos)]
 
-    # come up with a way to directly import this from the xml file
-    obstacles = [(-432.5, -664.5), (-480.5, -663.5), (-480.5, -683.5), (-481.5, -683.5), (-432.5, -675.5), (-450.5, -675.5), (-451.5, -675.5)]
-    
-    agent = AStarAgent(original_pos, bounds, obstacles)
+
+    agent = AStarAgent(original_pos, bounds)
 
     try:
         tic=timeit.default_timer()
@@ -85,25 +83,42 @@ if __name__ == '__main__':
                 frames.append(img)
 
                 a = agent.next_step()
-                #logging.info("Agent action: %s" % actions[a])
+                logging.info("Agent action: %s" % actions[a])
                 
                 # doublecheck why is this using a 1234 thing
                 #print('prev position:', agent.x, agent.z)
                 #print('a', a)
                 obs, reward, done, info = env.step(a)
+                #print('obs len', len(obs))
+                #print('obs', obs[-1])
+                print('action space', env.action_space)
                 #print('info:', info[183:224])
                 if info:
-                    #print(info)
+                    print(info)
                     agent.x, agent.z = extract_real_pos(info)
+                    info_dict = json.loads(info)
+                    agent.obstacles = info_dict['floor3x3']
                 #print('new pos', agent.x, agent.z)
-                
+                # ok I can actually change the grid obs thing by adjusting y=-1 to something else
+                # it's just looking at the floor lol
+
+                # ok so now that I can see the whole grid
+                # need to write a script to collect all of that into something I can use for my a star
+                # it really just needs to grab it once
+                # put everything on a .5 coord
+
+                # I still haven't really figured out this stupid weird loop it falls into though
+                # I think it's something to do with it not moving a full step and getting pulled back?
+                # honestly tomorrow I might just switch over to sampling a velocity and a dir
+                # because this is the worst.
+
                 coords.append((agent.x, agent.y, agent.z))
 
                 if (agent.x, agent.y, agent.z) == last_place:
                     repeat_count += 1
-                    #print('repeat')
+                    print('repeat')
                     if (repeat_count > 4):
-                        #print('generating new target bc repeats')
+                        print('generating new target bc repeats')
                         agent._generate_target()
                         repeat_count = 0
                 else:
@@ -112,14 +127,14 @@ if __name__ == '__main__':
 
                 steps += 1
     
-                time.sleep(.5)
+                time.sleep(5)
     
         toc=timeit.default_timer()
         print(f'Elapsed time for {args.episodes} episodes and {args.episodemaxsteps} steps:{toc - tic}')
 
-    except Exception as e:
-        print("Failed to complete mission:", e)
-        print(f"Completed {i} episodes and {steps} steps")
+    #except Exception as e:
+     #   print("Failed to complete mission:", e)
+     #   print(f"Completed {i} episodes and {steps} steps")
 
     finally:
         if frames:
