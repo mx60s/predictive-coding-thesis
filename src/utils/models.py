@@ -2,30 +2,7 @@ import torch
 from torch import nn, optim
 import torch.nn.functional as F
 
-# TODO need to contend with head direction happening 
-
-'''
-To perform predictive coding, we construct an encoderdecoder convolutional neural network with a ResNet18 architecture40 for the encoder and a corresponding ResNet-18 architecture with transposed convolutions in the decoder (Figure 1(b)). The encoder-decoder architecture uses the U-Net architecture41 to pass the encoded latent units into the decoder. Multi-headed attention processes the sequence of encoded latent units to encode the history of past visual observations. The multi-headed attention has ℎ = 8 heads. For the encoded latent units with dimension 𝐷 = 𝐶 × 𝐻 × 𝑊, the dimension 𝑑 of a single head is 𝑑 = 𝐶 × 𝐻 × 𝑊/ℎ. The predictive coder approximates predictive coding by minimizing the mean-squared error between the Pre-print |
-
-actual observation and its predicted observation. The predictive coder trains on 82, 630 samples for 200 epochs with gradient descent optimization with Nesterov momentum43, a weight decay of 5 × 10−6, and a learning rate of 10−1 adjusted by OneCycle learning rate scheduling44. The optimized predictive coder has to a mean-squared error between the predicted and actual images of 0.094 and a good visual fidelity (Figure 1(c)).
-'''
-
 device = 'cuda'
-
-class LocationPredictor(nn.Module):
-    """
-    A simple feedforward network which predicts the position of the agent from a set of latent variables
-    """
-    def __init__(self, input_dim=128, hidden_dim=200):
-        super().__init__()
-        self.layer1 = nn.Linear(input_dim, 200)
-        self.layer2 = nn.Linear(200, 2)
-        
-    def forward(self, x):
-        x = self.layer1(x)
-        x = self.layer2(x)
-        return x
-
 
 # arch from here: https://github.com/julianstastny/VAE-ResNet18-PyTorch/tree/master
 # with transposed convolutions subbed out -- may need to change that later
@@ -121,7 +98,7 @@ class ResNet18Enc(nn.Module):
         return nn.Sequential(*layers)
 
     def forward(self, x):
-        print('start enc', torch.cuda.memory_allocated(device))
+        #print('start enc', torch.cuda.memory_allocated(device))
         x = self.bn1(torch.relu(self.conv1(x)))
         x = self.layer1(x)
         x = self.layer2(x)
@@ -130,7 +107,7 @@ class ResNet18Enc(nn.Module):
         
         x = F.adaptive_avg_pool2d(x, 1) # this sets it to [channel, 1, 1]
         x = x.view(x.size(0), -1)
-        print('end enc', torch.cuda.memory_allocated(device))
+        #print('end enc', torch.cuda.memory_allocated(device))
         return x 
 
 
@@ -159,7 +136,7 @@ class ResNet18Dec(nn.Module):
 
     # feels bad to interpolate up so much. Should I try to just run this on 64x64 imgs instead?
     def forward(self, x):
-        print('start dec', torch.cuda.memory_allocated(device))
+        #print('start dec', torch.cuda.memory_allocated(device))
         x = self.linear(x)
         x = x.view(x.size(0), 1024, 1, 1)
         x = F.interpolate(x, scale_factor=8)
@@ -169,7 +146,7 @@ class ResNet18Dec(nn.Module):
         x = self.layer1(x)
         x = torch.sigmoid(self.conv1(x))
         x = x.view(x.size(0), 3, 128, 128)
-        print('end dec', torch.cuda.memory_allocated(device))
+        #print('end dec', torch.cuda.memory_allocated(device))
         return x
 
 # TODO is causal???
@@ -183,10 +160,10 @@ class MySelfAttention(nn.Module):
         # so does it make most sense to do a linear ff 
 
     def forward(self, x):
-        print('start attn', torch.cuda.memory_allocated(device))
+        #print('start attn', torch.cuda.memory_allocated(device))
         x = self.conv1(x)
         out_attn, _ = self.attn(x, x, x, need_weights=False)
-        print('out attn', torch.cuda.memory_allocated(device))
+        #print('out attn', torch.cuda.memory_allocated(device))
         return out_attn[:, -1, :]
 
 class BasicAE(nn.Module):
@@ -211,6 +188,7 @@ class PredictiveCoder(nn.Module):
         self.decoder = ResNet18Dec()
 
     def forward(self, x):
+        torch.cuda.empty_cache()
         encoded_frames = [self.encoder(frame.squeeze(1)) for frame in x.split(1, dim=1)]
         encoded_frames = torch.stack(encoded_frames, dim=1).squeeze(2)
         
@@ -218,3 +196,27 @@ class PredictiveCoder(nn.Module):
         
         pred = self.decoder(z)
         return pred
+
+# TODO: should this also be tasked to predict the head direction of the sample?
+class LocationPredictor(nn.Module):
+    """
+    A simple feedforward network which predicts the position of the agent from a set of latent variables
+    """
+    def __init__(self, latent_model: PredictiveCoder , input_dim=128, hidden_dim=200):
+        super().__init__()
+        self.encoder = latent_model.encoder
+        self.attn = latent_model.attn
+        
+        self.layer1 = nn.Linear(input_dim, 200)
+        self.layer2 = nn.Linear(200, 2)
+        
+    def forward(self, x):
+        with torch.no_grad():
+            encoded_frames = [self.encoder(frame.squeeze(1)) for frame in x.split(1, dim=1)]
+            encoded_frames = torch.stack(encoded_frames, dim=1).squeeze(2)
+            z = self.attn(encoded_frames)
+        
+        out = F.relu(self.layer1(z))
+        out = self.layer2(out)
+        
+        return out

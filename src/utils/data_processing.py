@@ -1,4 +1,5 @@
 import numpy as np
+import os 
 
 def remove_consecutive_repeats(np_file_path):
     """
@@ -13,7 +14,6 @@ def remove_consecutive_repeats(np_file_path):
 
     if len(data) > 0:
         unique_idx.append(len(data) - 1)
-
     del data
     return unique_idx
     
@@ -27,6 +27,7 @@ def map_files_to_chunks(source_directory, target_directory, file_start, seq_len)
         if filename.startswith(file_start):
             filepath = os.path.join(source_directory, filename)
             data = np.load(filepath, mmap_mode='r')
+            data = np.load(filepath, mmap_mode='r')
     
             for i in range(len(data) - (seq_len + 1)):
                 chunk = data[i:i + seq_len + 1]
@@ -35,5 +36,6 @@ def map_files_to_chunks(source_directory, target_directory, file_start, seq_len)
                 file_index += 1
     
             del data
+            os.remove(filepath)
 
     return file_index
