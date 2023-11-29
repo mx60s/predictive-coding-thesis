@@ -179,7 +179,6 @@ class BasicAE(nn.Module):
         x = self.decoder(z)
         return x#, z
 
-
 class PredictiveCoder(nn.Module):
     def __init__(self):
         super().__init__()
@@ -188,15 +187,16 @@ class PredictiveCoder(nn.Module):
         self.decoder = ResNet18Dec()
 
     def forward(self, x):
-        torch.cuda.empty_cache()
-        encoded_frames = [self.encoder(frame.squeeze(1)) for frame in x.split(1, dim=1)]
-        encoded_frames = torch.stack(encoded_frames, dim=1).squeeze(2)
+        batch_size, sequence_length, c, h, w = x.size()
         
+        x = x.view(batch_size * sequence_length, c, h, w)
+        encoded_frames = self.encoder(x)
+        encoded_frames = encoded_frames.view(batch_size, sequence_length, -1)
         z = self.attn(encoded_frames)
         
         pred = self.decoder(z)
         return pred
-
+        
 # TODO: should this also be tasked to predict the head direction of the sample?
 class LocationPredictor(nn.Module):
     """
