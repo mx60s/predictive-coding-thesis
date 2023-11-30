@@ -29,8 +29,8 @@ class SequentialFrameDataset(Dataset):
         return self.length
 
     def __getitem__(self, idx):
-        if torch.is_tensor(idx):
-            idx = idx.tolist()
+        #if torch.is_tensor(idx):
+        #    idx = idx.tolist()
 
         # will this work with multiple idx? does it need to?
         filename = self.data_directory + '/' + str(idx) + '.npy'
@@ -46,7 +46,8 @@ class SequentialFrameDataset(Dataset):
             for i in range(self.seq_len):
                 seq_list.append(self.transform(sequence[i]))
             pred = self.transform(pred)
-        
+
+        # TODO fix no transform case
         seq_tensor = torch.stack(seq_list)
         
         sample = [seq_tensor, pred]
@@ -91,7 +92,8 @@ class CoordinateDataset(Dataset):
         sequence = frames[:-1]
         pred = coords[-1]
 
-        del sample
+        del frames
+        del coords
 
         seq_list = []
         if self.transform:
@@ -112,7 +114,7 @@ def train(dataloader, model, loss_fn, optimizer, device) -> float:
 
     model.train()
     for batch, (X, y) in enumerate(dataloader):
-        X = X.to(device)
+        X, y = X.to(device), y.to(device)
         optimizer.zero_grad()
         
         #print(X.shape)
@@ -140,7 +142,7 @@ def test(dataloader, model, loss_fn, device) -> float:
     model.eval()
     with torch.no_grad():
         for X, y in dataloader:
-            X = X.to(device)
+            X,y = X.to(device), y.to(device)
             gen = model(X)
             test_loss += loss_fn(gen, y).item()
 

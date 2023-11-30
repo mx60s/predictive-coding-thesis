@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
     <Mission xmlns="http://ProjectMalmo.microsoft.com" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
         <About>
-            <Summary>Paper env</Summary>
+            <Summary>Continuous</Summary>
         </About>
 
         <ModSettings>
@@ -24,21 +24,15 @@
         <AgentSection mode="Survival">
             <Name>Agent0</Name>
             <AgentStart>
-                  <Placement pitch="0" x="-459.5" y="4" yaw="0" z="-658.5"/>
+                  <Placement pitch="0" x="-444.5" y="4" yaw="0" z="-674.5"/>
             </AgentStart>
             <AgentHandlers>
-                <ObservationFromGrid>
-                    <Grid absoluteCoords="true" name="floor">
-                    <min x="-484" y="3" z="-694"/>
-                    <max x="-427" y="3" z="-658"/>
-                    </Grid>
-                </ObservationFromGrid>
-                <DiscreteMovementCommands/>
+                <ContinuousMovementCommands/>
                 <MissionQuitCommands/>
                 <ObservationFromFullStats/>
                 <VideoProducer want_depth="false">
-                   <Width>128</Width>
-                   <Height>128</Height>
+                   <Width>512</Width>
+                   <Height>512</Height>
                 </VideoProducer>
             </AgentHandlers>            
         </AgentSection>

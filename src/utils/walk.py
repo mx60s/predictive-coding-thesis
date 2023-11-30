@@ -35,17 +35,32 @@ if __name__ == '__main__':
     imgs_path = '../data/frames_' + args.missionname + '_' + datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
     coords_path = '../data/coords_' + args.missionname + '_' + datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
 
-    env.init(xml, args.port,
-            server='127.0.0.05',
-             exp_uid=args.experimentUniqueId,
-             reshape=True)
-
     original_pos = -453.5, -674.5, 0.0
-    bounds = ((-489, -424), (-695, -655))
-    frames, coords = [], [np.array(original_pos)]
+    bounds = ((-484, -427), (-694, -658))
+    frames, coords = [], []
+    # water bounds are roughly -451.5, -440.5, -658.5,-672 and -451, -442 -677, -692
+    
+    # Shuffle the starting position within the environment
+    x, z = -445.5, -660.5
+    i = 0
+    while (x > -451.5 and x < -440.5 and z < -658.5 and z > -672.5) or \
+            (x > -451.5 and x < -442.5 and z < -677.5 and z > -692.5):
+        x = random.randint(bounds[0][0], bounds[0][1]) + 0.5
+        z = random.randint(bounds[1][0], bounds[1][1]) + 0.5
+        i += 1
+        if i > 100:
+            raise Exception("I hate myself and you")
+
+    print(f'Starting position {x, z}')
+    xml.replace('x_position', str(x))
+    xml.replace('z_position', str(z))
 
     agent = AStarAgent(original_pos, bounds)
 
+    env.init(xml, args.port,
+            server='127.0.0.05',
+            exp_uid=args.experimentUniqueId,
+            reshape=True)
 
     try:
         # Step backwards once to collect first observation
@@ -55,8 +70,9 @@ if __name__ == '__main__':
             obs, reward, done, info = env.step(1)
         info_dict = json.loads(info)
         agent.world_state = info_dict['floor']
+        
         last_place = agent.x, agent.z = info_dict['XPos'], info_dict['ZPos']
-
+        agent.yaw = info_dict['Yaw']
         time.sleep(0.1)
 
         # commands are, in order, forward, backward, turn right, turn left
@@ -67,33 +83,26 @@ if __name__ == '__main__':
         for i in range(args.steps):
             img = np.asarray(env.render(mode='rgb_array'))
             frames.append(img)
+            coords.append(np.array([agent.x, agent.z, agent.yaw]))
 
             a = agent.next_step()
             logging.info("Agent action: %s" % a)
 
             if a == 'right':
                 env.step(2)
-                time.sleep(0.05)
             elif a == 'left':
                 env.step(3)
-                time.sleep(0.05)
             elif a == 'backwards':
                 env.step(2)
-                time.sleep(0.05)
                 env.step(2)
-                time.sleep(0.05)
-
             # whatever this is just to try and knock it out of any weird patterns
             if random.gauss(1, 0.5) > 1.5:
                 env.step(2)
-                time.sleep(0.05)
             
             obs, reward, done, info = env.step(0)
 
             info_dict = json.loads(info)
             agent.x, agent.z, agent.yaw = info_dict['XPos'], info_dict['ZPos'], info_dict['Yaw']
-            coords.append(np.array([agent.x, agent.z, agent.yaw]))
-
             # this helps to unstick the agent, since my obstacle checking is not perfect right now
             if (agent.x, agent.z) == last_place:
                 repeat_count += 1
@@ -111,7 +120,7 @@ if __name__ == '__main__':
                 raise Exception("out of bounds")
 
 
-            time.sleep(.1)
+            time.sleep(.01)
         
     except Exception as e:
         print("Failed to complete mission:", e)

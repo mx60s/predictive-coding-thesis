@@ -17,7 +17,7 @@
                 <Weather>clear</Weather>
             </ServerInitialConditions>
             <ServerHandlers>
-		    <FileWorldGenerator src="/home/maggie/predictive-coding-thesis/src/envs/mcworld" forceReset="1"/> 
+		    <FileWorldGenerator src="/home/maggie/predictive-coding-thesis/src/envs/predcodenofence" forceReset="1"/> 
             <DrawingDecorator>
                 <DrawBlock type="planks" x="-432" y="4" z="-663"/>
                 <DrawBlock type="planks" x="-432" y="5" z="-663"/>
@@ -56,6 +56,12 @@
                   <Placement pitch="0" x="-451.5" y="4" yaw="0" z="-671.5"/>
             </AgentStart>
             <AgentHandlers>
+                <ObservationFromGrid>
+                    <Grid absoluteCoords="true" name="floor">
+                    <min x="-484" y="3" z="-694"/>
+                    <max x="-427" y="3" z="-658"/>
+                    </Grid>
+                </ObservationFromGrid>
                 <DiscreteMovementCommands/>
                 <MissionQuitCommands/>
                 <ObservationFromFullStats/>
