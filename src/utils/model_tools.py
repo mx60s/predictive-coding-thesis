@@ -62,17 +62,37 @@ class CoordinateDataset(Dataset):
     def __init__(self, source_directory, target_directory_name, transform=None, seq_len=7):
         target_dir_frames = os.path.join(source_directory, target_directory_name, 'frames')
         target_dir_coords = os.path.join(source_directory, target_directory_name, 'coords')
-        if not os.path.exists(target_dir_frames):
-            self.length = map_files_to_chunks(source_directory, target_dir_frames, 'frames_', seq_len)
-        else:
-            print("Assuming already indexed frame files in", target_dir_frames)
-            self.length = len([name for name in os.listdir(target_dir_frames)])
-            
-        if not os.path.exists(target_dir_coords):
-            map_files_to_chunks(source_directory, target_dir_coords, 'coords_', seq_len)
-        else:
-            print("Assuming already indexed coords files in", target_dir_coords)
+
+        os.makedirs(target_dir_frames)
+        os.makedirs(target_dir_coords)
         
+        file_index = 0
+        for file in os.listdir(source_directory):
+            if file.startswith('frames_'):
+                timestamp = file[len('frames_'):]
+                coords_file = 'coords_' + timestamp
+
+                frame_path = os.path.join(source_directory, file)
+                coords_path = os.path.join(source_directory, coords_file)
+                frames = np.load(frame_path)
+                coords = np.load(coords_path)
+                
+                if len(frames) != len(coords):
+                    continue
+                    
+                for i in range(len(frames) - (seq_len + 1)):
+                    frames_chunk = frames[i:i + seq_len + 1]
+                    coords_chunk = coords[i:i + seq_len + 1]
+                    frames_chunk_fp = os.path.join(target_dir_frames, f'{file_index}.npy')
+                    coords_chunk_fp = os.path.join(target_dir_coords, f'{file_index}.npy')
+                    np.save(frames_chunk_fp, frames_chunk)
+                    np.save(coords_chunk_fp, coords_chunk)
+                    file_index += 1
+    
+                del frames
+                del coords
+
+        self.length = file_index
         self.frames_directory = target_dir_frames
         self.coords_directory = target_dir_coords
         self.transform = transform
@@ -82,9 +102,6 @@ class CoordinateDataset(Dataset):
         return self.length
 
     def __getitem__(self, idx):
-        if torch.is_tensor(idx):
-            idx = idx.tolist()
-
         frame_file = self.frames_directory + '/' + str(idx) + '.npy'
         coords_file = self.coords_directory + '/' + str(idx) + '.npy'
         frames = np.load(frame_file)
@@ -97,7 +114,7 @@ class CoordinateDataset(Dataset):
 
         seq_list = []
         if self.transform:
-            for i in range(self.seq_len):
+            for i in range(len(sequence)):
                 seq_list.append(self.transform(sequence[i]))
         
         seq_tensor = torch.stack(seq_list)
