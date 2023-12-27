@@ -17,6 +17,9 @@ from agents import *
 
 logging.basicConfig(level=logging.DEBUG)
 
+def convert_coords(x, z, min_x=-488, min_z=-690): # it's also possible that the +1 idx is a bit off
+    return int(x - min_x), int(z - min_z)
+
 if __name__ == '__main__':
     
     parser = argparse.ArgumentParser(description='malmoenv test')
@@ -35,104 +38,123 @@ if __name__ == '__main__':
     imgs_path = '../data/frames_' + args.missionname + '_' + datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
     coords_path = '../data/coords_' + args.missionname + '_' + datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
 
-    original_pos = -453.5, -674.5, 0.0
-    bounds = ((-484, -427), (-694, -658))
+    bounds = ((-488, -423), (-690, -650))
+    start = -446, -674
+    start_relative = convert_coords(*start)
     frames, coords = [], []
-    # water bounds are roughly -451.5, -440.5, -658.5,-672 and -451, -442 -677, -692
+
+    agent = AStarAgent((*start_relative, 90), 40, 65)
     
-    # Shuffle the starting position within the environment
-    x, z = -445.5, -660.5
-    i = 0
-    while (x > -451.5 and x < -440.5 and z < -658.5 and z > -672.5) or \
-            (x > -451.5 and x < -442.5 and z < -677.5 and z > -692.5):
-        x = random.randint(bounds[0][0], bounds[0][1]) + 0.5
-        z = random.randint(bounds[1][0], bounds[1][1]) + 0.5
-        i += 1
-        if i > 100:
-            raise Exception("I hate myself and you")
-
-    print(f'Starting position {x, z}')
-    xml.replace('x_position', str(x))
-    xml.replace('z_position', str(z))
-
-    agent = AStarAgent(original_pos, bounds)
-
     env.init(xml, args.port,
             server='127.0.0.05',
             exp_uid=args.experimentUniqueId,
             reshape=True)
 
-    try:
-        # Step backwards once to collect first observation
-        obs = env.reset()
-        info = None
-        while not info:
-            obs, reward, done, info = env.step(1)
-        info_dict = json.loads(info)
-        agent.world_state = info_dict['floor']
+    #idx = 2
+    #action_dict = {}
+    #for i in range(-488, -423):
+    #    for j in range(-690, -650):
+    #        # lol
+    #        env.action_space.actions.append(f'tp {i} 4 {j}')
+    #        action_dict[(i, j)] = idx
+
+    #env.action_space.actions.append('strafe 1')
+    #env.action_space.actions.append('strafe -1')
+    
+    # Step backwards once to collect first observation
+    obs = env.reset()
+    info = None
+    while not info:
+        obs, reward, done, info = env.step(0)
+        print('uhh')
+    info_dict = json.loads(info)
+    agent.x, agent.z = convert_coords(info_dict['XPos'], info_dict['ZPos'])
+    agent.yaw = info_dict['Yaw']
         
-        last_place = agent.x, agent.z = info_dict['XPos'], info_dict['ZPos']
-        agent.yaw = info_dict['Yaw']
-        time.sleep(0.1)
+    agent.world_state = info_dict['floor']
 
-        # commands are, in order, forward, backward, turn right, turn left
-        repeat_count = 0
-        special_repeats = 0
-        special = False
+    #print(info_dict['XPos'], info_dict['ZPos'])
+    #print(agent.x, agent.z)
 
+    #print(agent.world_state)
+
+    last_pos = agent.x, agent.z
+    repeat = 0
+
+    try:
         for i in range(args.steps):
+            if not agent.target:
+                agent.target = agent.generate_target()
             img = np.asarray(env.render(mode='rgb_array'))
             frames.append(img)
-            coords.append(np.array([agent.x, agent.z, agent.yaw]))
-
-            a = agent.next_step()
-            logging.info("Agent action: %s" % a)
-
-            if a == 'right':
-                env.step(2)
-            elif a == 'left':
-                env.step(3)
-            elif a == 'backwards':
-                env.step(2)
-                env.step(2)
-            # whatever this is just to try and knock it out of any weird patterns
-            if random.gauss(1, 0.5) > 1.5:
-                env.step(2)
+            coords.append(np.array([agent.x, agent.z, agent.yaw, agent.target[0], agent.target[1]]))
+            print(agent.x, agent.z)
+    
+            #print(info_dict['XPos'], info_dict['ZPos'])
+            #print(convert_back(agent.x, agent.z))
             
-            obs, reward, done, info = env.step(0)
+            #x, z = agent.next_step()
+            #print("Agent action:", x, z)
+    
+            #coord = convert_back(x+5, z)
+            #action_str = f'tp {coord[0]} 4 {coord[1]}'
+            #print(coord)
+            #print(action_str)
+            #print(env.action_space.actions.index(action_str))
+            #idx = env.action_space.actions.index(action_str)
+    
+            #obs, reward, done, info = env.step(idx)
+    
+            a = agent.next_step()
+            info = None
+    
+            while not info:
+                if a == 'backward':
+                    print('backward')
+                    obs, reward, done, info = env.step(2)
+                    obs, reward, done, info = env.step(2)
+                if a == 'right':
+                    print('right')
+                    obs, reward, done, info = env.step(2)
+                if a == 'left':
+                    print('left')
+                    obs, reward, done, info = env.step(3)
+                
+                obs, reward, done, info = env.step(0)
 
+            # this will be better to just change yaw, but leave for now.
+    
             info_dict = json.loads(info)
-            agent.x, agent.z, agent.yaw = info_dict['XPos'], info_dict['ZPos'], info_dict['Yaw']
-            # this helps to unstick the agent, since my obstacle checking is not perfect right now
-            if (agent.x, agent.z) == last_place:
-                repeat_count += 1
-                if (repeat_count > 4):
-                    env.step(1)
-                    env.step(2)
-                    agent._generate_target()
-                    repeat_count = 0
-            else:
-                repeat_count = 0
-                last_place = (agent.x, agent.z)
+            agent.x, agent.z = convert_coords(info_dict['XPos'], info_dict['ZPos'])
+            agent.yaw = info_dict['Yaw']
 
-            # this is also dumb but works enough for now: fix
-            if agent.x < bounds[0][0] or agent.x > bounds[0][1] or agent.z < bounds[1][0] or agent.z > bounds[1][1]:
+            if agent.x < 0 or agent.x > 65 or agent.z < 0 or agent.z > 40:
                 raise Exception("out of bounds")
-
-
+    
+            if last_pos == (agent.x, agent.z):
+                print('repeat')
+                repeat += 1
+                if repeat > 4:
+                    agent.target = agent.generate_target()
+                    repeat = 0
+            else:
+                repeat = 0
+    
+            last_pos = agent.x, agent.z
+    
             time.sleep(.01)
-        
-    except Exception as e:
-        print("Failed to complete mission:", e)
-        print(f"Completed {i} steps")
 
+    except e:
+        print('Failed with exception', e)
+        env.close()
     finally:
+        np_frames, np_coords = None, None
         if frames and len(frames) > 7:
+            print(len(frames))
             print("saving")
             np_frames = np.stack(frames, axis=0 )
             np.save(imgs_path, np_frames)
-
+    
             np_coords = np.stack(coords, axis=0)
             np.save(coords_path, np_coords)
-
-        env.close()  
+     

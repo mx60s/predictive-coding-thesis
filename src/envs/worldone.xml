@@ -24,17 +24,21 @@
         <AgentSection mode="Survival">
             <Name>Agent0</Name>
             <AgentStart>
-                  <Placement pitch="0" x="-459.5" y="4" yaw="0" z="-658.5"/>
+                  <Placement pitch="0" x="-444.5" y="4" yaw="90" z="-674.5"/>
             </AgentStart>
             <AgentHandlers>
                 <ObservationFromGrid>
                     <Grid absoluteCoords="true" name="floor">
-                    <min x="-484" y="3" z="-694"/>
-                    <max x="-427" y="3" z="-658"/>
+                    <min x="-488" y="3" z="-690"/>
+                    <max x="-424" y="3" z="-651"/>
                     </Grid>
                 </ObservationFromGrid>
-                <DiscreteMovementCommands/>
-                <MissionQuitCommands/>
+                <DiscreteMovementCommands>
+                    <ModifierList type="allow-list">
+                        <command>move</command>
+                        <command>turn</command>
+                    </ModifierList>
+                </DiscreteMovementCommands>
                 <ObservationFromFullStats/>
                 <VideoProducer want_depth="false">
                    <Width>128</Width>
