@@ -89,6 +89,8 @@ class ResNet18Enc(nn.Module):
         self.layer3 = self._make_layer(BasicBlockEnc, 512, num_Blocks[2], stride=2)
         self.layer4 = self._make_layer(BasicBlockEnc, 512, num_Blocks[3], stride=1)
 
+        self.final = nn.Conv1d(7, 7, kernel_size=3, stride=4) # contract from [7, 512] to [7, 128]
+
     def _make_layer(self, BasicBlockEnc, planes, num_Blocks, stride):
         strides = [stride] + [1]*(num_Blocks-1)
         layers = []
@@ -108,11 +110,11 @@ class ResNet18Enc(nn.Module):
         x = F.adaptive_avg_pool2d(x, 1) # this sets it to [channel, 1, 1]
         x = x.view(x.size(0), -1)
         #print('end enc', torch.cuda.memory_allocated(device))
-        return x 
+        return self.final(x) 
 
 
 class ResNet18Dec(nn.Module):
-    def __init__(self, z_dim=128, num_Blocks=[2,2,2,2], nc=3):
+    def __init__(self, z_dim=144, num_Blocks=[2,2,2,2], nc=3):
         super().__init__()
         self.in_planes = 1024
 
@@ -151,9 +153,8 @@ class ResNet18Dec(nn.Module):
 
 # TODO is causal???
 class MySelfAttention(nn.Module):
-    def __init__(self, embed_dim=128, heads=8):
+    def __init__(self, embed_dim=144, heads=8):
         super().__init__()
-        self.conv1 = nn.Conv1d(7, 7, kernel_size=3, stride=4) # contract from [7, 512] to [7, 128]
         self.attn = nn.MultiheadAttention(embed_dim, heads, batch_first=True)
         # specifically in the paper they say that this is a conv but...
         # no matter what, the prediction is just a 1D vector
@@ -161,7 +162,6 @@ class MySelfAttention(nn.Module):
 
     def forward(self, x):
         #print('start attn', torch.cuda.memory_allocated(device))
-        x = self.conv1(x)
         out_attn, _ = self.attn(x, x, x, need_weights=False)
         #print('out attn', torch.cuda.memory_allocated(device))
         return out_attn[:, -1, :]
@@ -178,6 +178,16 @@ class BasicAE(nn.Module):
         z = self.encoder(x)
         x = self.decoder(z)
         return x#, z
+
+
+class TurnScaler(nn.Module):
+    def __init__(self, input_dim=1, output_dim=16):
+        super(TurnScaler, self).__init__()
+        self.fc = nn.Linear(input_dim, output_dim)
+
+    def forward(self, x):
+        return F.tanh(self.fc(x))
+
 
 class PredictiveCoder(nn.Module):
     def __init__(self):
@@ -196,7 +206,37 @@ class PredictiveCoder(nn.Module):
         
         pred = self.decoder(z)
         return pred
+
+class PredictiveCoderWithHead(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.encoder = ResNet18Enc()
+        self.attn = MySelfAttention()
+        self.decoder = ResNet18Dec()
+
+        self.scale = TurnScaler()
+
+    def forward(self, x, d):
+        displacement_flat = torch.cat(d, dim=0)
+        displacements_scaled = self.scale(displacement_flat)
+
+        batch_size, sequence_length, c, h, w = x.size()
+        x = x.view(batch_size * sequence_length, c, h, w)
+        encoded_frames = self.encoder(x)
+
+        concatenated_vector = torch.cat((encoded_frames, displacements_scaled), dim=1)
+        batch_size, sequence_length = displacements_scaled.size(0), displacements_scaled.size(1)
+        combined_sequence = concatenated_vector.view(batch_size, sequence_length, -1)
+
+        # Apply Layer Normalization
+        layer_norm = nn.LayerNorm(combined_sequence.size(0))
+        normalized_sequence = layer_norm(combined_sequence)
         
+        z = self.attn(normalized_sequence)
+        
+        pred = self.decoder(z)
+        return pred
+
 # TODO: should this also be tasked to predict the head direction of the sample?
 class LocationPredictor(nn.Module):
     """
