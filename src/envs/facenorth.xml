@@ -1,0 +1,49 @@
+<?xml version="1.0"?>
+    <Mission xmlns="http://ProjectMalmo.microsoft.com" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+        <About>
+            <Summary>Facing north (like the paper)</Summary>
+        </About>
+
+        <ModSettings>
+            <MsPerTick>50</MsPerTick>
+        </ModSettings>
+
+        <ServerSection>
+            <ServerInitialConditions>
+                <Time>
+                    <StartTime>6000</StartTime>
+                    <AllowPassageOfTime>false</AllowPassageOfTime>
+                </Time>
+                <Weather>clear</Weather>
+            </ServerInitialConditions>
+            <ServerHandlers>
+		    <FileWorldGenerator src="/home/maggie/predictive-coding-thesis/src/envs/mcworldfinished" forceReset="1"/> 
+            </ServerHandlers>
+        </ServerSection>
+
+        <AgentSection mode="Survival">
+            <Name>Agent0</Name>
+            <AgentStart>
+                  <Placement pitch="0" x="-444.5" y="4" yaw="90" z="-674.5"/>
+            </AgentStart>
+            <AgentHandlers>
+                <ObservationFromGrid>
+                    <Grid absoluteCoords="true" name="floor">
+                    <min x="-488" y="3" z="-690"/>
+                    <max x="-424" y="3" z="-651"/>
+                    </Grid>
+                </ObservationFromGrid>
+                <DiscreteMovementCommands>
+                    <ModifierList type="allow-list">
+                        <command>move</command>
+                        <command>strafe</command>
+                    </ModifierList>
+                </DiscreteMovementCommands>
+                <ObservationFromFullStats/>
+                <VideoProducer want_depth="false">
+                   <Width>128</Width>
+                   <Height>128</Height>
+                </VideoProducer>
+            </AgentHandlers>            
+        </AgentSection>
+</Mission>
