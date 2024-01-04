@@ -1,13 +1,12 @@
-import malmoenv
 import math
-import gym
 import heapq
 import random
 from typing import Tuple, List
 
+
 class AStarAgent:
     """
-    An agent which comes up with random paths throughout the environment, and then generates the 
+    An agent which comes up with random paths throughout the environment, and then generates the
     actions via A* to traverse them.
     """
     def __init__(self, start_pos: Tuple, width: int, length: int):
@@ -130,7 +129,7 @@ class AStarAgent:
         if not trajectory: # if you can't find a path, make new target and try again
             print('no path')
             self.target = None
-            return 'special'
+            return "special"
 
         #print(trajectory)
         
@@ -140,4 +139,8 @@ class AStarAgent:
         # Translate point to action
         #print(trajectory[1])
         #return trajectory[1]
+<<<<<<< HEAD
         return self._get_relative_dir((dx, dz))
+=======
+        return self._get_relative_dir((dx, dz))
+>>>>>>> 98602d9a1c7fdf920487e66dd587b16ac017451e
