@@ -79,17 +79,17 @@ class BasicBlockDec(nn.Module):
 class ResNet18Enc(nn.Module):
     def __init__(self, num_Blocks=[2,2,2,2], nc=3):
         super().__init__()
-        self.in_planes = 128
+        self.in_planes = 64
         # also the paper doesn't mention this first convolution
         # honestly not going to mess with this now because it doesn't seem like the most important thing
-        self.conv1 = nn.Conv2d(nc, 128, kernel_size=3, stride=2, padding=1, bias=False)
-        self.bn1 = nn.BatchNorm2d(128)
-        self.layer1 = self._make_layer(BasicBlockEnc, 128, num_Blocks[0], stride=1)
-        self.layer2 = self._make_layer(BasicBlockEnc, 256, num_Blocks[1], stride=2)
-        self.layer3 = self._make_layer(BasicBlockEnc, 512, num_Blocks[2], stride=2)
-        self.layer4 = self._make_layer(BasicBlockEnc, 512, num_Blocks[3], stride=1)
+        self.conv1 = nn.Conv2d(nc, 64, kernel_size=3, stride=2, padding=1, bias=False)
+        self.bn1 = nn.BatchNorm2d(64)
+        self.layer1 = self._make_layer(BasicBlockEnc, 64, num_Blocks[0], stride=1)
+        self.layer2 = self._make_layer(BasicBlockEnc, 128, num_Blocks[1], stride=2)
+        self.layer3 = self._make_layer(BasicBlockEnc, 256, num_Blocks[2], stride=2)
+        self.layer4 = self._make_layer(BasicBlockEnc, 256, num_Blocks[3], stride=1)
 
-        self.final = nn.Conv1d(7, 7, kernel_size=3, stride=4) # contract from [7, 512] to [7, 128]
+        self.final = nn.Linear(256, 128) # contract from [7, 256] to [7, 128]
 
     def _make_layer(self, BasicBlockEnc, planes, num_Blocks, stride):
         strides = [stride] + [1]*(num_Blocks-1)
@@ -108,7 +108,9 @@ class ResNet18Enc(nn.Module):
         x = self.layer4(x)
         
         x = F.adaptive_avg_pool2d(x, 1) # this sets it to [channel, 1, 1]
+        #print(x.shape)
         x = x.view(x.size(0), -1)
+        #print(x.shape)
         #print('end enc', torch.cuda.memory_allocated(device))
         return self.final(x) 
 
@@ -116,17 +118,17 @@ class ResNet18Enc(nn.Module):
 class ResNet18Dec(nn.Module):
     def __init__(self, z_dim=144, num_Blocks=[2,2,2,2], nc=3):
         super().__init__()
-        self.in_planes = 1024
+        self.in_planes = 512
 
         # this is set so high so you can have the first stride=2, so it expands the H,W dims more
         # accurate to the referenced ResNet
-        self.linear = nn.Linear(z_dim, 1024)
+        self.linear = nn.Linear(z_dim, 512)
 
-        self.layer4 = self._make_layer(BasicBlockDec, 512, num_Blocks[3], stride=2)
-        self.layer3 = self._make_layer(BasicBlockDec, 256, num_Blocks[2], stride=2)
-        self.layer2 = self._make_layer(BasicBlockDec, 128, num_Blocks[1], stride=2)
-        self.layer1 = self._make_layer(BasicBlockDec, 128, num_Blocks[0], stride=1)
-        self.conv1 = ResizeConv2d(128, nc, kernel_size=3, scale_factor=2)
+        self.layer4 = self._make_layer(BasicBlockDec, 256, num_Blocks[3], stride=2)
+        self.layer3 = self._make_layer(BasicBlockDec, 128, num_Blocks[2], stride=2)
+        self.layer2 = self._make_layer(BasicBlockDec, 64, num_Blocks[1], stride=2)
+        self.layer1 = self._make_layer(BasicBlockDec, 64, num_Blocks[0], stride=1)
+        self.conv1 = ResizeConv2d(64, nc, kernel_size=3, scale_factor=2)
 
     def _make_layer(self, BasicBlockDec, planes, num_Blocks, stride):
         strides = [stride] + [1]*(num_Blocks-1)
@@ -140,14 +142,14 @@ class ResNet18Dec(nn.Module):
     def forward(self, x):
         #print('start dec', torch.cuda.memory_allocated(device))
         x = self.linear(x)
-        x = x.view(x.size(0), 1024, 1, 1)
-        x = F.interpolate(x, scale_factor=8)
+        x = x.view(x.size(0), 512, 1, 1)
+        x = F.interpolate(x, scale_factor=4)
         x = self.layer4(x)
         x = self.layer3(x)
         x = self.layer2(x)
         x = self.layer1(x)
         x = torch.sigmoid(self.conv1(x))
-        x = x.view(x.size(0), 3, 128, 128)
+        x = x.view(x.size(0), 3, 64, 64)
         #print('end dec', torch.cuda.memory_allocated(device))
         return x
 
@@ -155,6 +157,10 @@ class ResNet18Dec(nn.Module):
 class MySelfAttention(nn.Module):
     def __init__(self, embed_dim=144, heads=8):
         super().__init__()
+        sequence_length = 7
+        batch_size = 32 # change later lol
+        self.mask = torch.nn.Transformer.generate_square_subsequent_mask(sz=sequence_length).to(device)
+        
         self.attn = nn.MultiheadAttention(embed_dim, heads, batch_first=True)
         # specifically in the paper they say that this is a conv but...
         # no matter what, the prediction is just a 1D vector
@@ -162,23 +168,28 @@ class MySelfAttention(nn.Module):
 
     def forward(self, x):
         #print('start attn', torch.cuda.memory_allocated(device))
-        out_attn, _ = self.attn(x, x, x, need_weights=False)
+        out_attn, attn_weights = self.attn(x, x, x, need_weights=True, is_causal=True, attn_mask=self.mask)
         #print('out attn', torch.cuda.memory_allocated(device))
-        return out_attn[:, -1, :]
+        return out_attn[:, -1, :], attn_weights
 
-class BasicAE(nn.Module):
+class PredictiveCoder(nn.Module):
     def __init__(self):
         super().__init__()
         self.encoder = ResNet18Enc()
-        self.decoder = ResNet18Dec()
+        self.attn = MySelfAttention(embed_dim=128)
+        self.decoder = ResNet18Dec(z_dim=128)
 
     def forward(self, x):
-        # I'm changing this to just be an AE so it matches the architecture better
-        # still wondering if this is a U Net as well
-        z = self.encoder(x)
-        x = self.decoder(z)
-        return x#, z
+        batch_size, sequence_length, c, h, w = x.size()
+        x = x.view(batch_size * sequence_length, c, h, w)
 
+        encoded_frames = self.encoder(x)
+        encoded_frames = encoded_frames.view(batch_size, sequence_length, -1)
+        z, weights = self.attn(encoded_frames)
+        
+        pred = self.decoder(z)
+        
+        return pred, weights
 
 class TurnScaler(nn.Module):
     def __init__(self, input_dim=1, output_dim=16):
@@ -187,25 +198,6 @@ class TurnScaler(nn.Module):
 
     def forward(self, x):
         return F.tanh(self.fc(x))
-
-
-class PredictiveCoder(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.encoder = ResNet18Enc()
-        self.attn = MySelfAttention()
-        self.decoder = ResNet18Dec()
-
-    def forward(self, x):
-        batch_size, sequence_length, c, h, w = x.size()
-        
-        x = x.view(batch_size * sequence_length, c, h, w)
-        encoded_frames = self.encoder(x)
-        encoded_frames = encoded_frames.view(batch_size, sequence_length, -1)
-        z = self.attn(encoded_frames)
-        
-        pred = self.decoder(z)
-        return pred
 
 class PredictiveCoderWithHead(nn.Module):
     def __init__(self):
@@ -245,16 +237,13 @@ class LocationPredictor(nn.Module):
     def __init__(self, latent_model: PredictiveCoder , input_dim=128, hidden_dim=200):
         super().__init__()
         self.encoder = latent_model.encoder
-        self.attn = latent_model.attn
         
-        self.layer1 = nn.Linear(input_dim, 200)
-        self.layer2 = nn.Linear(200, 2)
+        self.layer1 = nn.Linear(input_dim, hidden_dim)
+        self.layer2 = nn.Linear(hidden_dim, 2)
         
     def forward(self, x):
         with torch.no_grad():
-            encoded_frames = [self.encoder(frame.squeeze(1)) for frame in x.split(1, dim=1)]
-            encoded_frames = torch.stack(encoded_frames, dim=1).squeeze(2)
-            z = self.attn(encoded_frames)
+            z = self.encoder(x)
         
         out = F.relu(self.layer1(z))
         out = self.layer2(out)
