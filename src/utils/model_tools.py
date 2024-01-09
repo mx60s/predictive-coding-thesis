@@ -19,6 +19,7 @@ class SequentialFrameDataset(Dataset):
             self.length = map_files_to_chunks(source_directory, target_directory, 'frames_', seq_len)
         else:
             print("Assuming already indexed files in", target_directory)
+            
             self.length = len([name for name in os.listdir(target_directory)])
         
         self.data_directory = target_directory
@@ -55,58 +56,105 @@ class SequentialFrameDataset(Dataset):
         return sample
 
 class CoordinateDataset(Dataset):
-    """
-    Essentially the same as the sequential frame dataset, but this time the prediction will be the 
-    ground-truth coordinates of the agent for the predicted next frame.
-    """
-    def __init__(self, source_directory, target_directory_name, transform=None, seq_len=7):
-        target_dir_frames = os.path.join(source_directory, target_directory_name, 'frames')
-        target_dir_coords = os.path.join(source_directory, target_directory_name, 'coords')
-        if not os.path.exists(target_dir_frames):
-            self.length = map_files_to_chunks(source_directory, target_dir_frames, 'frames_', seq_len)
-        else:
-            print("Assuming already indexed frame files in", target_dir_frames)
-            self.length = len([name for name in os.listdir(target_dir_frames)])
-            
-        if not os.path.exists(target_dir_coords):
-            map_files_to_chunks(source_directory, target_dir_coords, 'coords_', seq_len)
-        else:
-            print("Assuming already indexed coords files in", target_dir_coords)
-        
-        self.frames_directory = target_dir_frames
-        self.coords_directory = target_dir_coords
+    def __init__(self, directory, transform=None):
+        self.directory = directory
+        self.pairs, self.cumulative_sizes = self._find_pairs()
         self.transform = transform
-        self.seq_len = seq_len 
 
+    def _find_pairs(self):
+        files = os.listdir(self.directory)
+        frames_files = [f for f in files if f.startswith("frames_")]
+        pairs = []
+        cumulative_sizes = [0]
+        for frame_file in frames_files:
+            timestamp = frame_file[len("frames_"):]
+            coord_file = f"coords_{timestamp}"
+            if coord_file in files:
+                pairs.append((frame_file, coord_file))
+                frame_count = len(np.load(os.path.join(self.directory, frame_file)))
+                cumulative_sizes.append(cumulative_sizes[-1] + frame_count)
+        return pairs, cumulative_sizes
+
+    def __len__(self):
+        return self.cumulative_sizes[-1]
+
+    def __getitem__(self, idx):
+        file_index = next(i for i, total in enumerate(self.cumulative_sizes) if total > idx)
+        frame_file, coord_file = self.pairs[file_index - 1]
+        frame_index = idx - self.cumulative_sizes[file_index - 1]
+
+        frame_path = os.path.join(self.directory, frame_file)
+        coord_path = os.path.join(self.directory, coord_file)
+        
+        frames = np.load(frame_path)
+        coords = np.load(coord_path)
+
+        frame = frames[frame_index]
+        coord = coords[frame_index][:-1] # for now, exclude the heading direction
+
+        if self.transform:
+            frame = self.transform(frame)
+
+        coord = torch.from_numpy(coord).type(torch.FloatTensor)
+        
+        return frame, coord
+
+class HeadingDataset(Dataset):
+    """
+    A dataset that provides sequences of frames in correct temporal order, plus the next step as the prediction target.
+    Assumes input is a path to a numpy file containing a list of numpy arrays of size (3, 128, 128)
+    """
+    def __init__(self, source_directory, transform=None, seq_len=7):
+        frames_directory = os.path.join(source_directory, 'frames')
+        coords_directory = os.path.join(source_directory, 'coords')
+        
+        if not os.path.exists(frames_directory): # for now, assuming that if one exists, the other should
+            self.length = map_files_to_chunks(source_directory, frames_directory, 'frames_', seq_len)
+            map_files_to_chunks(source_directory, coords_directory, 'coords_', seq_len)
+        else:
+            print("Assuming already indexed files")
+            self.length = len([name for name in os.listdir(frames_directory)])
+
+        self.frames_directory = frames_directory
+        self.coords_directory = coords_directory
+        self.transform = transform
+        self.seq_len = seq_len
+        
     def __len__(self):
         return self.length
 
     def __getitem__(self, idx):
-        if torch.is_tensor(idx):
-            idx = idx.tolist()
-
-        frame_file = self.frames_directory + '/' + str(idx) + '.npy'
-        coords_file = self.coords_directory + '/' + str(idx) + '.npy'
+        # will this work with multiple idx? does it need to?
+        frame_file = f'{self.frames_directory}/' + str(idx) + '.npy'
+        coord_file = f'{self.coords_directory}/' + str(idx) + '.npy'
         frames = np.load(frame_file)
-        coords = np.load(coords_file)
+        coords = np.load(coord_file)
         sequence = frames[:-1]
-        pred = coords[-1]
+        pred = frames[-1]
+        headings = coords[:, 2]
+
+        # change in heading between steps, in degrees
+        for i in range(self.seq_len):
+            headings[i] = headings[i+1] - headings[i]
 
         del frames
         del coords
 
         seq_list = []
+
         if self.transform:
             for i in range(self.seq_len):
                 seq_list.append(self.transform(sequence[i]))
-        
+            pred = self.transform(pred)
+
+        heading_tensor = torch.from_numpy(headings[:-1])
+
+        # TODO fix no transform case
         seq_tensor = torch.stack(seq_list)
-        pred_tensor = torch.tensor(pred)
         
-        sample = [seq_tensor, pred_tensor]
+        sample = [(seq_tensor, heading_tensor), pred]
         
         return sample
-
 
 def train(dataloader, model, loss_fn, optimizer, device) -> float:
     size = len(dataloader.dataset)
@@ -118,8 +166,9 @@ def train(dataloader, model, loss_fn, optimizer, device) -> float:
         optimizer.zero_grad()
         
         #print(X.shape)
+        #gen, weights = model(X)
         gen = model(X)
-
+        
         loss = loss_fn(gen, y) 
         loss.backward()
         optimizer.step()
@@ -143,6 +192,7 @@ def test(dataloader, model, loss_fn, device) -> float:
     with torch.no_grad():
         for X, y in dataloader:
             X,y = X.to(device), y.to(device)
+            #gen, weights = model(X)
             gen = model(X)
             test_loss += loss_fn(gen, y).item()
 
