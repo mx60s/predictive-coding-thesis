@@ -105,37 +105,53 @@ class HeadingDataset(Dataset):
     Assumes input is a path to a numpy file containing a list of numpy arrays of size (3, 128, 128)
     """
     def __init__(self, source_directory, transform=None, seq_len=7):
-        frames_directory = os.path.join(source_directory, 'frames')
-        coords_directory = os.path.join(source_directory, 'coords')
-        
-        if not os.path.exists(frames_directory): # for now, assuming that if one exists, the other should
-            self.length = map_files_to_chunks(source_directory, frames_directory, 'frames_', seq_len)
-            map_files_to_chunks(source_directory, coords_directory, 'coords_', seq_len)
-        else:
-            print("Assuming already indexed files")
-            self.length = len([name for name in os.listdir(frames_directory)])
-
-        self.frames_directory = frames_directory
-        self.coords_directory = coords_directory
+        self.source_directory = source_directory
         self.transform = transform
         self.seq_len = seq_len
+        self.file_pairs = []
+        self.sample_indices = []
+
+        frames_files = sorted([f for f in os.listdir(source_directory) if f.startswith('frames_')])
+        coords_files = sorted([f for f in os.listdir(source_directory) if f.startswith('coords_')])
+
+        for f_file in frames_files:
+            f_file.index('_')
+            suffix = f_file[f_file.index('_'):]
+            c_file = 'coords' + suffix
+            if c_file in coords_files:
+                self.file_pairs.append((f_file, c_file))
+
+            frames = np.load(os.path.join(self.source_directory, f_file))
+            num_samples = len(frames) - (self.seq_len + 1) + 1
+
+            for i in range(num_samples):
+                self.sample_indices.append((len(self.file_pairs) - 1, i))
+        
         
     def __len__(self):
-        return self.length
+        return len(self.sample_indices)
 
     def __getitem__(self, idx):
-        # will this work with multiple idx? does it need to?
-        frame_file = f'{self.frames_directory}/' + str(idx) + '.npy'
-        coord_file = f'{self.coords_directory}/' + str(idx) + '.npy'
-        frames = np.load(frame_file)
-        coords = np.load(coord_file)
+        file_idx, sample_idx = self.sample_indices[idx]
+        frame_file, coord_file = self.file_pairs[file_idx]
+
+        frames = np.load(os.path.join(self.source_directory, frame_file))[sample_idx:sample_idx + self.seq_len + 1]
+        coords = np.load(os.path.join(self.source_directory, coord_file))[sample_idx:sample_idx + self.seq_len + 1]
+        
         sequence = frames[:-1]
         pred = frames[-1]
+        
         headings = coords[:, 2]
 
         # change in heading between steps, in degrees
+        differences = []
         for i in range(self.seq_len):
-            headings[i] = headings[i+1] - headings[i]
+            diff = headings[i+1] - headings[i]
+            if diff > 180:
+                diff -= 360
+            elif diff < -180:
+                diff += 360
+            differences.append(diff)
 
         del frames
         del coords
@@ -147,7 +163,7 @@ class HeadingDataset(Dataset):
                 seq_list.append(self.transform(sequence[i]))
             pred = self.transform(pred)
 
-        heading_tensor = torch.from_numpy(headings[:-1])
+        heading_tensor = torch.FloatTensor(differences)
 
         # TODO fix no transform case
         seq_tensor = torch.stack(seq_list)
@@ -162,12 +178,13 @@ def train(dataloader, model, loss_fn, optimizer, device) -> float:
 
     model.train()
     for batch, (X, y) in enumerate(dataloader):
-        X, y = X.to(device), y.to(device)
+        x_img, x_head = X
+        x_img, x_head, y = x_img.to(device), x_head.to(device), y.to(device)
         optimizer.zero_grad()
         
         #print(X.shape)
         #gen, weights = model(X)
-        gen = model(X)
+        gen = model(x_img, x_head)
         
         loss = loss_fn(gen, y) 
         loss.backward()
@@ -191,9 +208,10 @@ def test(dataloader, model, loss_fn, device) -> float:
     model.eval()
     with torch.no_grad():
         for X, y in dataloader:
-            X,y = X.to(device), y.to(device)
+            x_img, x_head = X
+            x_img, x_head, y = x_img.to(device), x_head.to(device), y.to(device)
             #gen, weights = model(X)
-            gen = model(X)
+            gen = model(x_img, x_head)
             test_loss += loss_fn(gen, y).item()
 
     test_loss /= num_batches

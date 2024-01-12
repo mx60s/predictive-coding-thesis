@@ -158,7 +158,6 @@ class MySelfAttention(nn.Module):
     def __init__(self, embed_dim=144, heads=8):
         super().__init__()
         sequence_length = 7
-        batch_size = 32 # change later lol
         self.mask = torch.nn.Transformer.generate_square_subsequent_mask(sz=sequence_length).to(device)
         
         self.attn = nn.MultiheadAttention(embed_dim, heads, batch_first=True)
@@ -177,7 +176,7 @@ class PredictiveCoder(nn.Module):
         super().__init__()
         self.encoder = ResNet18Enc()
         self.attn = MySelfAttention(embed_dim=128)
-        self.decoder = ResNet18Dec(z_dim=128)
+        self.decoder = ResNet18Dec()
 
     def forward(self, x):
         batch_size, sequence_length, c, h, w = x.size()
@@ -203,29 +202,31 @@ class PredictiveCoderWithHead(nn.Module):
     def __init__(self):
         super().__init__()
         self.encoder = ResNet18Enc()
-        self.attn = MySelfAttention()
+        self.attn = MySelfAttention(embed_dim=144)
         self.decoder = ResNet18Dec()
 
         self.scale = TurnScaler()
 
     def forward(self, x, d):
-        displacement_flat = torch.cat(d, dim=0)
-        displacements_scaled = self.scale(displacement_flat)
+        batch_size, sequence_length = d.shape
+        d = d.view(batch_size * sequence_length, 1)
+        displacements_scaled = self.scale(d)
+        displacements_scaled = displacements_scaled.view(batch_size, sequence_length, -1)
 
         batch_size, sequence_length, c, h, w = x.size()
         x = x.view(batch_size * sequence_length, c, h, w)
+        
         encoded_frames = self.encoder(x)
+        encoded_frames = encoded_frames.view(batch_size, sequence_length, -1)
 
-        concatenated_vector = torch.cat((encoded_frames, displacements_scaled), dim=1)
-        batch_size, sequence_length = displacements_scaled.size(0), displacements_scaled.size(1)
-        combined_sequence = concatenated_vector.view(batch_size, sequence_length, -1)
+        concatenated_vector = torch.cat((encoded_frames, displacements_scaled), dim=2)
 
         # Apply Layer Normalization
-        layer_norm = nn.LayerNorm(combined_sequence.size(0))
-        normalized_sequence = layer_norm(combined_sequence)
+        layer_norm = nn.LayerNorm(concatenated_vector.size(2)).to(device)
+        normalized_sequence = layer_norm(concatenated_vector)
         
-        z = self.attn(normalized_sequence)
-        
+        z, weights = self.attn(normalized_sequence)
+
         pred = self.decoder(z)
         return pred
 
