@@ -116,7 +116,7 @@ class ResNet18Enc(nn.Module):
 
 
 class ResNet18Dec(nn.Module):
-    def __init__(self, z_dim=144, num_Blocks=[2,2,2,2], nc=3):
+    def __init__(self, z_dim=128, num_Blocks=[2,2,2,2], nc=3):
         super().__init__()
         self.in_planes = 512
 
@@ -176,7 +176,7 @@ class PredictiveCoder(nn.Module):
         super().__init__()
         self.encoder = ResNet18Enc()
         self.attn = MySelfAttention(embed_dim=128)
-        self.decoder = ResNet18Dec()
+        self.decoder = ResNet18Dec(z_dim=128)
 
     def forward(self, x):
         batch_size, sequence_length, c, h, w = x.size()
@@ -230,12 +230,24 @@ class PredictiveCoderWithHead(nn.Module):
         pred = self.decoder(z)
         return pred
 
+
+class AutoEncoder(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.encoder = ResNet18Enc()
+        self.decoder = ResNet18Dec(z_dim=128)
+
+    def forward(self, x):
+        z = self.encoder(x)
+        return self.decoder(z)
+
+
 # TODO: should this also be tasked to predict the head direction of the sample?
 class LocationPredictor(nn.Module):
     """
     A simple feedforward network which predicts the position of the agent from a set of latent variables
     """
-    def __init__(self, latent_model: PredictiveCoder , input_dim=128, hidden_dim=200):
+    def __init__(self, latent_model: PredictiveCoder , input_dim=128, hidden_dim=256):
         super().__init__()
         self.encoder = latent_model.encoder
         

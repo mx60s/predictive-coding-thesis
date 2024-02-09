@@ -139,8 +139,5 @@ class AStarAgent:
         # Translate point to action
         #print(trajectory[1])
         #return trajectory[1]
-<<<<<<< HEAD
         return self._get_relative_dir((dx, dz))
-=======
-        return self._get_relative_dir((dx, dz))
->>>>>>> 98602d9a1c7fdf920487e66dd587b16ac017451e
+

@@ -7,6 +7,46 @@ from utils.data_processing import map_files_to_chunks
 
 # thank you Marlan
 
+class AutoencoderDataset(Dataset):
+    """
+    A dataset that provides sequences of frames in correct temporal order, plus the next step as the prediction target.
+    Assumes input is a path to a numpy file containing a list of numpy arrays of size (3, 128, 128)
+    """
+    def __init__(self, source_directory, transform=None, seq_len=0):
+        self.source_directory = source_directory
+        self.transform = transform
+        self.seq_len = seq_len
+        self.file_pairs = []
+        self.sample_indices = []
+
+        frames_files = sorted([f for f in os.listdir(source_directory) if f.startswith('frames_')])
+        coords_files = sorted([f for f in os.listdir(source_directory) if f.startswith('coords_')])
+
+        for f_file in frames_files:
+            f_file.index('_')
+            suffix = f_file[f_file.index('_'):]
+            c_file = 'coords' + suffix
+            if c_file in coords_files:
+                self.file_pairs.append((f_file, c_file))
+
+            frames = np.load(os.path.join(self.source_directory, f_file))
+            num_samples = len(frames) - (self.seq_len + 1) + 1
+
+            for i in range(num_samples):
+                self.sample_indices.append((len(self.file_pairs) - 1, i))
+        
+    def __len__(self):
+        return len(self.sample_indices)
+
+    def __getitem__(self, idx):
+        file_idx, sample_idx = self.sample_indices[idx]
+        frame_file, _ = self.file_pairs[file_idx]
+        frame = np.load(os.path.join(self.source_directory, frame_file))[sample_idx]
+
+        frame = self.transform(frame)
+        
+        return frame
+
 class SequentialFrameDataset(Dataset):
     """
     A dataset that provides sequences of frames in correct temporal order, plus the next step as the prediction target.
@@ -54,50 +94,6 @@ class SequentialFrameDataset(Dataset):
         sample = [seq_tensor, pred]
         
         return sample
-
-class CoordinateDataset(Dataset):
-    def __init__(self, directory, transform=None):
-        self.directory = directory
-        self.pairs, self.cumulative_sizes = self._find_pairs()
-        self.transform = transform
-
-    def _find_pairs(self):
-        files = os.listdir(self.directory)
-        frames_files = [f for f in files if f.startswith("frames_")]
-        pairs = []
-        cumulative_sizes = [0]
-        for frame_file in frames_files:
-            timestamp = frame_file[len("frames_"):]
-            coord_file = f"coords_{timestamp}"
-            if coord_file in files:
-                pairs.append((frame_file, coord_file))
-                frame_count = len(np.load(os.path.join(self.directory, frame_file)))
-                cumulative_sizes.append(cumulative_sizes[-1] + frame_count)
-        return pairs, cumulative_sizes
-
-    def __len__(self):
-        return self.cumulative_sizes[-1]
-
-    def __getitem__(self, idx):
-        file_index = next(i for i, total in enumerate(self.cumulative_sizes) if total > idx)
-        frame_file, coord_file = self.pairs[file_index - 1]
-        frame_index = idx - self.cumulative_sizes[file_index - 1]
-
-        frame_path = os.path.join(self.directory, frame_file)
-        coord_path = os.path.join(self.directory, coord_file)
-        
-        frames = np.load(frame_path)
-        coords = np.load(coord_path)
-
-        frame = frames[frame_index]
-        coord = coords[frame_index][:-1] # for now, exclude the heading direction
-
-        if self.transform:
-            frame = self.transform(frame)
-
-        coord = torch.from_numpy(coord).type(torch.FloatTensor)
-        
-        return frame, coord
 
 class HeadingDataset(Dataset):
     """
@@ -172,7 +168,50 @@ class HeadingDataset(Dataset):
         
         return sample
 
-def train(dataloader, model, loss_fn, optimizer, device) -> float:
+class CoordinateDataset(Dataset):
+    """
+    A dataset that provides sequences of frames in correct temporal order, plus the next step as the prediction target.
+    Assumes input is a path to a numpy file containing a list of numpy arrays of size (3, 128, 128)
+    """
+    def __init__(self, source_directory, transform=None, seq_len=0):
+        self.source_directory = source_directory
+        self.transform = transform
+        self.seq_len = seq_len
+        self.file_pairs = []
+        self.sample_indices = []
+
+        frames_files = sorted([f for f in os.listdir(source_directory) if f.startswith('frames_')])
+        coords_files = sorted([f for f in os.listdir(source_directory) if f.startswith('coords_')])
+
+        for f_file in frames_files:
+            f_file.index('_')
+            suffix = f_file[f_file.index('_'):]
+            c_file = 'coords' + suffix
+            if c_file in coords_files:
+                self.file_pairs.append((f_file, c_file))
+
+            frames = np.load(os.path.join(self.source_directory, f_file))
+            num_samples = len(frames) - (self.seq_len + 1) + 1
+
+            for i in range(num_samples):
+                self.sample_indices.append((len(self.file_pairs) - 1, i))
+        
+    def __len__(self):
+        return len(self.sample_indices)
+
+    def __getitem__(self, idx):
+        file_idx, sample_idx = self.sample_indices[idx]
+        frame_file, coord_file = self.file_pairs[file_idx]
+
+        frame = np.load(os.path.join(self.source_directory, frame_file))[sample_idx]
+        coord = np.load(os.path.join(self.source_directory, coord_file))[sample_idx]
+
+        frame = self.transform(frame)
+        coord = torch.FloatTensor(coord)
+        
+        return [frame, coord]
+
+def train_heading(dataloader, model, loss_fn, optimizer, device) -> float:
     size = len(dataloader.dataset)
     train_loss = 0.0
 
@@ -200,7 +239,7 @@ def train(dataloader, model, loss_fn, optimizer, device) -> float:
     return train_loss/len(dataloader)
 
 
-def test(dataloader, model, loss_fn, device) -> float:
+def test_heading(dataloader, model, loss_fn, device) -> float:
     size = len(dataloader.dataset)
     num_batches = len(dataloader)
     test_loss = 0.0
@@ -221,12 +260,59 @@ def test(dataloader, model, loss_fn, device) -> float:
 
     return test_loss
 
+def train(dataloader, model, loss_fn, optimizer, device) -> float:
+    size = len(dataloader.dataset)
+    train_loss = 0.0
+
+    model.train()
+    for batch, (X, y) in enumerate(dataloader):
+        X, y = X.to(device), y.to(device)
+        optimizer.zero_grad()
+        
+        #print(X.shape)
+        #gen, weights = model(X)
+        gen = model(X)
+        
+        loss = loss_fn(gen, y) 
+        loss.backward()
+        optimizer.step()
+
+        # Append lists
+        train_loss += loss.item()
+
+        if batch % 1000 == 0:
+            loss, current = loss.item(), batch * len(X)
+            print(f"loss: {loss:>7f}  [{current:>5d}/{size:>5d}]")
+
+    return train_loss/len(dataloader)
+
+
+def test(dataloader, model, loss_fn, device) -> float:
+    size = len(dataloader.dataset)
+    num_batches = len(dataloader)
+    test_loss = 0.0
+
+    model.eval()
+    with torch.no_grad():
+        for X, y in dataloader:
+            X, y = X.to(device), y.to(device)
+            #gen, weights = model(X)
+            gen = model(X)
+            test_loss += loss_fn(gen, y).item()
+
+    test_loss /= num_batches
+
+    print(
+        f"Test Error: \n Avg loss: {test_loss:>8f} \n")
+
+    return test_loss
+
 def train_no_pred(dataloader, model, loss_fn, optimizer, device) -> float:
     size = len(dataloader.dataset)
     train_loss = 0.0
 
     model.train()
-    for batch, (X, _) in enumerate(dataloader):
+    for batch, X in enumerate(dataloader):
         X = X.to(device)
         optimizer.zero_grad()
         
@@ -254,7 +340,7 @@ def test_no_pred(dataloader, model, loss_fn, device) -> float:
 
     model.eval()
     with torch.no_grad():
-        for X, _ in dataloader:
+        for X in dataloader:
             X = X.to(device)
             gen = model(X)
             test_loss += loss_fn(gen, X).item()
