@@ -1,215 +1,115 @@
 import torch
 import torchmetrics
 import numpy as np
+import pickle
 from torch.utils.data import Dataset
 import os
 from utils.data_processing import map_files_to_chunks
 
-# thank you Marlan
 
 class AutoencoderDataset(Dataset):
-    """
-    A dataset that provides sequences of frames in correct temporal order, plus the next step as the prediction target.
-    Assumes input is a path to a numpy file containing a list of numpy arrays of size (3, 128, 128)
-    """
-    def __init__(self, source_directory, transform=None, seq_len=0):
-        self.source_directory = source_directory
-        self.transform = transform
-        self.seq_len = seq_len
-        self.file_pairs = []
-        self.sample_indices = []
+    def __init__(self, source_directory, transform=None):
+        self.sorted_frames = []
+
+        frames_list = []
 
         frames_files = sorted([f for f in os.listdir(source_directory) if f.startswith('frames_')])
-        coords_files = sorted([f for f in os.listdir(source_directory) if f.startswith('coords_')])
-
+        print(frames_files)
         for f_file in frames_files:
-            f_file.index('_')
-            suffix = f_file[f_file.index('_'):]
-            c_file = 'coords' + suffix
-            if c_file in coords_files:
-                self.file_pairs.append((f_file, c_file))
+            frames = np.load(os.path.join(source_directory, f_file))
+            frames_list.append(frames)
 
-            frames = np.load(os.path.join(self.source_directory, f_file))
-            num_samples = len(frames) - (self.seq_len + 1) + 1
-
-            for i in range(num_samples):
-                self.sample_indices.append((len(self.file_pairs) - 1, i))
-        
+        self.sorted_frames = torch.stack([transform(frame) for stack in frames_list for frame in stack])
+    
     def __len__(self):
-        return len(self.sample_indices)
+        return len(self.sorted_frames)
 
     def __getitem__(self, idx):
-        file_idx, sample_idx = self.sample_indices[idx]
-        frame_file, _ = self.file_pairs[file_idx]
-        frame = np.load(os.path.join(self.source_directory, frame_file))[sample_idx]
+        return self.sorted_frames[idx]
 
-        frame = self.transform(frame)
-        
-        return frame
 
-class SequentialFrameDataset(Dataset):
-    """
-    A dataset that provides sequences of frames in correct temporal order, plus the next step as the prediction target.
-    Assumes input is a path to a numpy file containing a list of numpy arrays of size (3, 128, 128)
-    """
-    def __init__(self, source_directory, target_directory_name, transform=None, seq_len=7):
-        target_directory = os.path.join(source_directory, target_directory_name)
-        
-        if not os.path.exists(target_directory):
-            self.length = map_files_to_chunks(source_directory, target_directory, 'frames_', seq_len)
-        else:
-            print("Assuming already indexed files in", target_directory)
-            
-            self.length = len([name for name in os.listdir(target_directory)])
-        
-        self.data_directory = target_directory
-        self.transform = transform
-        self.seq_len = seq_len
-        
-    def __len__(self):
-        return self.length
-
-    def __getitem__(self, idx):
-        #if torch.is_tensor(idx):
-        #    idx = idx.tolist()
-
-        # will this work with multiple idx? does it need to?
-        filename = self.data_directory + '/' + str(idx) + '.npy'
-        sample = np.load(filename)
-        sequence = sample[:-1]
-        pred = sample[-1]
-
-        del sample
-
-        seq_list = []
-
-        if self.transform:
-            for i in range(self.seq_len):
-                seq_list.append(self.transform(sequence[i]))
-            pred = self.transform(pred)
-
-        # TODO fix no transform case
-        seq_tensor = torch.stack(seq_list)
-        
-        sample = [seq_tensor, pred]
-        
-        return sample
-
-class HeadingDataset(Dataset):
+class SequentialFrameDataset(AutoencoderDataset):
     """
     A dataset that provides sequences of frames in correct temporal order, plus the next step as the prediction target.
     Assumes input is a path to a numpy file containing a list of numpy arrays of size (3, 128, 128)
     """
     def __init__(self, source_directory, transform=None, seq_len=7):
-        self.source_directory = source_directory
-        self.transform = transform
+        super().__init__(source_directory, transform)
         self.seq_len = seq_len
-        self.file_pairs = []
-        self.sample_indices = []
 
-        frames_files = sorted([f for f in os.listdir(source_directory) if f.startswith('frames_')])
-        coords_files = sorted([f for f in os.listdir(source_directory) if f.startswith('coords_')])
-
-        for f_file in frames_files:
-            f_file.index('_')
-            suffix = f_file[f_file.index('_'):]
-            c_file = 'coords' + suffix
-            if c_file in coords_files:
-                self.file_pairs.append((f_file, c_file))
-
-            frames = np.load(os.path.join(self.source_directory, f_file))
-            num_samples = len(frames) - (self.seq_len + 1) + 1
-
-            for i in range(num_samples):
-                self.sample_indices.append((len(self.file_pairs) - 1, i))
-        
-        
     def __len__(self):
-        return len(self.sample_indices)
+        return len(self.sorted_frames) - self.seq_len
 
     def __getitem__(self, idx):
-        file_idx, sample_idx = self.sample_indices[idx]
-        frame_file, coord_file = self.file_pairs[file_idx]
+        sequence = self.sorted_frames[idx:idx + self.seq_len + 1]
+        pred = self.sorted_frames[idx + self.seq_len + 1]
 
-        frames = np.load(os.path.join(self.source_directory, frame_file))[sample_idx:sample_idx + self.seq_len + 1]
-        coords = np.load(os.path.join(self.source_directory, coord_file))[sample_idx:sample_idx + self.seq_len + 1]
+        return [sequence, pred]
         
-        sequence = frames[:-1]
-        pred = frames[-1]
-        
-        headings = coords[:, 2]
 
-        # change in heading between steps, in degrees
-        differences = []
-        for i in range(self.seq_len):
-            diff = headings[i+1] - headings[i]
+class HeadingDataset(SequentialFrameDataset):
+    """
+    A dataset that provides sequences of frames in correct temporal order, plus the next step as the prediction target. It also provides the change in direction at each step.
+    Assumes input is a path to a numpy file containing a list of numpy arrays of size (3, 128, 128)
+    """
+    def __init__(self, source_directory, transform=None, seq_len=7):
+        super().__init__(source_directory, transform, seq_len)
+        
+        self.sorted_headings = []
+
+        # Collect the coordinates info associated with each frame
+        coords_list = []
+        coords_files = sorted([f for f in os.listdir(source_directory) if f.startswith('coords_')])
+        
+        for c_file in coords_files:
+            coords = np.load(os.path.join(source_directory, c_file))
+            coords_list.append(coords)
+
+        coords_list = [coord for stack in coords_list for coord in stack]
+
+        # Calculate heading displacement per step in degrees
+        headings = coords_list[:, 2]
+
+        for i in range(1, len(headings)):
+            diff = headings[i] - headings[i-1]
             if diff > 180:
                 diff -= 360
             elif diff < -180:
                 diff += 360
-            differences.append(diff)
+            self.sorted_headings.append(diff)
 
-        del frames
-        del coords
-
-        seq_list = []
-
-        if self.transform:
-            for i in range(self.seq_len):
-                seq_list.append(self.transform(sequence[i]))
-            pred = self.transform(pred)
-
-        heading_tensor = torch.FloatTensor(differences)
-
-        # TODO fix no transform case
-        seq_tensor = torch.stack(seq_list)
-        
-        sample = [(seq_tensor, heading_tensor), pred]
-        
-        return sample
-
-class CoordinateDataset(Dataset):
-    """
-    A dataset that provides sequences of frames in correct temporal order, plus the next step as the prediction target.
-    Assumes input is a path to a numpy file containing a list of numpy arrays of size (3, 128, 128)
-    """
-    def __init__(self, source_directory, transform=None, seq_len=0):
-        self.source_directory = source_directory
-        self.transform = transform
-        self.seq_len = seq_len
-        self.file_pairs = []
-        self.sample_indices = []
-
-        frames_files = sorted([f for f in os.listdir(source_directory) if f.startswith('frames_')])
-        coords_files = sorted([f for f in os.listdir(source_directory) if f.startswith('coords_')])
-
-        for f_file in frames_files:
-            f_file.index('_')
-            suffix = f_file[f_file.index('_'):]
-            c_file = 'coords' + suffix
-            if c_file in coords_files:
-                self.file_pairs.append((f_file, c_file))
-
-            frames = np.load(os.path.join(self.source_directory, f_file))
-            num_samples = len(frames) - (self.seq_len + 1) + 1
-
-            for i in range(num_samples):
-                self.sample_indices.append((len(self.file_pairs) - 1, i))
-        
-    def __len__(self):
-        return len(self.sample_indices)
+        # Convert to tensor 
+        self.sorted_headings = [torch.from_numpy(heading) for heading in self.sorted_headings]
 
     def __getitem__(self, idx):
-        file_idx, sample_idx = self.sample_indices[idx]
-        frame_file, coord_file = self.file_pairs[file_idx]
+        frame_sequence = self.sorted_frames[idx:idx + self.seq_len + 1]
+        pred = self.sorted_frames[idx + self.seq_len + 1]
 
-        frame = np.load(os.path.join(self.source_directory, frame_file))[sample_idx]
-        coord = np.load(os.path.join(self.source_directory, coord_file))[sample_idx]
+        heading_sequence = self.sorted_headings[idx:idx + self.seq_len + 1]
 
-        frame = self.transform(frame)
-        coord = torch.FloatTensor(coord)
+        return [(frame_sequence, heading_sequence), pred]
+
+
+class CoordinateDataset(AutoencoderDataset):
+    def __init__(self, source_directory, transform=None):
+        super().__init__(source_directory, transform)
         
-        return [frame, coord]
+        self.sorted_coords = []
+
+        # Collect the coordinates info associated with each frame
+        coords_list = []
+        coords_files = sorted([f for f in os.listdir(source_directory) if f.startswith('coords_')])
+        print(coords_files)
+        for c_file in coords_files:
+            coords = np.load(os.path.join(source_directory, c_file)).astype(np.float32)
+            coords_list.append(coords)
+
+        self.sorted_coords = [torch.from_numpy(coord) for stack in coords_list for coord in stack]
+
+    def __getitem__(self, idx):
+        return [self.sorted_frames[idx], self.sorted_coords[idx]]
+
+# Functions for training
 
 def train_heading(dataloader, model, loss_fn, optimizer, device) -> float:
     size = len(dataloader.dataset)
@@ -272,7 +172,7 @@ def train(dataloader, model, loss_fn, optimizer, device) -> float:
         #print(X.shape)
         #gen, weights = model(X)
         gen = model(X)
-        
+
         loss = loss_fn(gen, y) 
         loss.backward()
         optimizer.step()
@@ -316,7 +216,6 @@ def train_no_pred(dataloader, model, loss_fn, optimizer, device) -> float:
         X = X.to(device)
         optimizer.zero_grad()
         
-        #print(X.shape)
         gen = model(X)
 
         loss = loss_fn(gen, X) 

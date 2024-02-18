@@ -40,10 +40,10 @@ class BasicBlockEnc(nn.Module):
 
     def forward(self, x):
         # some modifications from source code to fit the paper's description
-        out = self.bn1(torch.relu(self.conv1(x)))
-        out = self.bn2(torch.relu(self.conv2(out)))
+        out = self.bn1(F.relu(self.conv1(x)))
+        out = self.bn2(F.relu(self.conv2(out)))
         out += self.shortcut(x)
-        out = torch.relu(out)
+        out = F.relu(out)
         return out
 
 
@@ -70,10 +70,10 @@ class BasicBlockDec(nn.Module):
             )
 
     def forward(self, x):
-        out = self.bn2(torch.relu(self.conv2(x)))
+        out = self.bn2(F.relu(self.conv2(x)))
         out = self.bn1(self.conv1(out))
         out += self.shortcut(x)
-        out = torch.relu(out)
+        out = F.relu(out)
         return out
 
 class ResNet18Enc(nn.Module):
@@ -101,7 +101,7 @@ class ResNet18Enc(nn.Module):
 
     def forward(self, x):
         #print('start enc', torch.cuda.memory_allocated(device))
-        x = self.bn1(torch.relu(self.conv1(x)))
+        x = self.bn1(F.relu(self.conv1(x)))
         x = self.layer1(x)
         x = self.layer2(x)
         x = self.layer3(x)
@@ -161,14 +161,9 @@ class MySelfAttention(nn.Module):
         self.mask = torch.nn.Transformer.generate_square_subsequent_mask(sz=sequence_length).to(device)
         
         self.attn = nn.MultiheadAttention(embed_dim, heads, batch_first=True)
-        # specifically in the paper they say that this is a conv but...
-        # no matter what, the prediction is just a 1D vector
-        # so does it make most sense to do a linear ff 
 
     def forward(self, x):
-        #print('start attn', torch.cuda.memory_allocated(device))
         out_attn, attn_weights = self.attn(x, x, x, need_weights=True, is_causal=True, attn_mask=self.mask)
-        #print('out attn', torch.cuda.memory_allocated(device))
         return out_attn[:, -1, :], attn_weights
 
 class PredictiveCoder(nn.Module):
@@ -202,6 +197,7 @@ class PredictiveCoderWithHead(nn.Module):
     def __init__(self):
         super().__init__()
         self.encoder = ResNet18Enc()
+        self.norm = nn.LayerNorm(144)
         self.attn = MySelfAttention(embed_dim=144)
         self.decoder = ResNet18Dec()
 
@@ -222,8 +218,7 @@ class PredictiveCoderWithHead(nn.Module):
         concatenated_vector = torch.cat((encoded_frames, displacements_scaled), dim=2)
 
         # Apply Layer Normalization
-        layer_norm = nn.LayerNorm(concatenated_vector.size(2)).to(device)
-        normalized_sequence = layer_norm(concatenated_vector)
+        normalized_sequence = self.norm(concatenated_vector)
         
         z, weights = self.attn(normalized_sequence)
 
