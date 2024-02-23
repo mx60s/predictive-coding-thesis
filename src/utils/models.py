@@ -185,6 +185,16 @@ class PredictiveCoder(nn.Module):
         
         return pred, weights
 
+    def get_latent_preds(self, x):
+        batch_size, sequence_length, c, h, w = x.size()
+        x = x.view(batch_size * sequence_length, c, h, w)
+
+        encoded_frames = self.encoder(x)
+        encoded_frames = encoded_frames.view(batch_size, sequence_length, -1)
+        z, weights = self.attn(encoded_frames)
+
+        return z
+
 class TurnScaler(nn.Module):
     def __init__(self, input_dim=1, output_dim=16):
         super(TurnScaler, self).__init__()
@@ -202,6 +212,11 @@ class PredictiveCoderWithHead(nn.Module):
         self.decoder = ResNet18Dec()
 
         self.scale = TurnScaler()
+        self.freeze_scale()
+
+    def freeze_scale(self):
+        for param in self.scale.parameters():
+            param.requires_grad = False
 
     def forward(self, x, d):
         batch_size, sequence_length = d.shape
@@ -225,6 +240,29 @@ class PredictiveCoderWithHead(nn.Module):
         pred = self.decoder(z)
         return pred
 
+    def get_latent_preds(self, x, d):
+        """
+        Return the predicted latents instead of the image
+        """
+        batch_size, sequence_length = d.shape
+        d = d.view(batch_size * sequence_length, 1)
+        displacements_scaled = self.scale(d)
+        displacements_scaled = displacements_scaled.view(batch_size, sequence_length, -1)
+
+        batch_size, sequence_length, c, h, w = x.size()
+        x = x.view(batch_size * sequence_length, c, h, w)
+        
+        encoded_frames = self.encoder(x)
+        encoded_frames = encoded_frames.view(batch_size, sequence_length, -1)
+
+        concatenated_vector = torch.cat((encoded_frames, displacements_scaled), dim=2)
+
+        # Apply Layer Normalization
+        normalized_sequence = self.norm(concatenated_vector)
+        
+        z, weights = self.attn(normalized_sequence)
+
+        return z
 
 class AutoEncoder(nn.Module):
     def __init__(self):
