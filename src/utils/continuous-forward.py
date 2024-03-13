@@ -36,15 +36,16 @@ class RandomAgent(object):
         self.rep = 0
         self.agent_host = agent_host
         self.action_set = action_set
-        self.tolerance = 0.9
+        self.tolerance = 0.5
         self.world_grid = []
         self.grid_length = 69
         self.min_x = -490
         self.min_z = -692
         self.frames = []
         self.coords = []
-        self.prev_turn = 0
-        self.last_action = 0
+        self.turn_momentum = 0
+        self.momentum_decay = 0.8
+        self.turn_change_chance = 0.2
 
     def waitForInitialState( self ):
         '''Before a command has been sent we wait for an observation of the world and a frame.'''
@@ -67,8 +68,7 @@ class RandomAgent(object):
             self.prev_x   =     obs[u'XPos']
             self.prev_y   =     obs[u'YPos']
             self.prev_z   =     obs[u'ZPos']
-            self.prev_yaw =     math.fmod(obs[u'Yaw'], 360)
-            self.base_yaw = self.prev_yaw
+            self.prev_yaw =     obs[u'Yaw']
             print('Initial position:',self.prev_x,',',self.prev_y,',',self.prev_z,'yaw',self.prev_yaw)
             
             if save_images:
@@ -81,16 +81,55 @@ class RandomAgent(object):
             
         return world_state
 
-    def convertCoords(self, x, z): # might need to be ceil? or? with neg?
-        return int(x - self.min_x), int(z - self.min_z)
+    def convert_coords(self, x, z):
+        grid_points = []
+        for dx in [-0.3, 0, 0.3]:
+            for dz in [-0.3, 0, 0.3]:
+                grid_points.append((int(x + dx - self.min_x), int(z + dz - self.min_z)))
+        return grid_points
 
-    def checkStep(self, x, z):
-        x, z = self.convertCoords(x, z)
-
-        if z * self.grid_length + x >= len(self.world_grid) or x < 0 or z < 0:
+    def check_step(self, x, z):
+        # avoid tricky spots
+        if (x, z) in [(-487.5, -678.5), (-447.5, -692.5)]:
             return False
-        obs = self.world_grid[z * self.grid_length + x]
-        return obs == 'grass' or obs == 'planks'
+
+        grid_points = self.convert_coords(x, z)
+        #print(len(grid_points))
+
+        for gx, gz in grid_points:
+            if gz * self.grid_length + gx >= len(self.world_grid) or gx < 0 or gz < 0:
+                return False
+
+            obs = self.world_grid[gz * self.grid_length + gx]
+            if not (obs == "grass" or obs == "planks"):
+                return False
+
+        return True
+
+    def check_proximity(self, x, z):
+        proximity_checks = []
+        proximity_score = 0
+
+        # Define a range or set of directions to check around the agent
+        for dx in [-0.4, 0, 0.4]:
+            for dz in [-0.4, 0, 0.4]:
+                if dx == 0 and dz == 0:
+                    continue  # Skip checking the current position
+
+                check_x = x + dx
+                check_z = z + dz
+                proximity_checks.append(self.check_step(check_x, check_z))
+
+        # Count the number of free (True) vs. obstructed (False) spaces
+        free_spaces = proximity_checks.count(True)
+        total_checks = len(proximity_checks)
+
+        # Calculate proximity score based on the ratio of free spaces to total checks
+        # Higher score means more free space around, lower score means closer to obstacles
+        if total_checks > 0:
+            proximity_score = free_spaces / total_checks
+
+        return proximity_score
 
     def waitForNextState( self ):
         '''After each command has been sent we wait for the observation to change as expected and a frame.'''
@@ -99,9 +138,10 @@ class RandomAgent(object):
         while True:
             world_state = self.agent_host.peekWorldState()
             if not world_state.is_mission_running:
-                print('mission ended.')
+                #print('mission ended.')
                 break
             if not all(e.text=='{}' for e in world_state.observations):
+                #print('got observation')
                 obs = json.loads( world_state.observations[-1].text )
                 self.curr_x   = obs[u'XPos']
                 self.curr_y   = obs[u'YPos']
@@ -109,9 +149,11 @@ class RandomAgent(object):
                 self.curr_yaw = math.fmod(obs[u'Yaw'], 360)
                 #print('curr?', self.curr_x, self.curr_z)
                 if self.require_move:
+                    #print('require move')
                     if math.fabs( self.curr_x - self.prev_x ) > self.tolerance or\
                        math.fabs( self.curr_y - self.prev_y ) > self.tolerance or\
                        math.fabs( self.curr_z - self.prev_z ) > self.tolerance:
+                       
                         #print('received a move.')
 
 
@@ -121,7 +163,7 @@ class RandomAgent(object):
                         #print('received a turn.')
                         break
                 else:
-                    #print('received.')
+                    ##print('received.')
                     break
 
         # wait for the render position to have changed
@@ -132,24 +174,26 @@ class RandomAgent(object):
                 #print('mission ended.')
                 break
             if len(world_state.video_frames) > 0:
+                #print('render changed')
                 frame = world_state.video_frames[-1]
                 curr_x_from_render   = frame.xPos
                 curr_y_from_render   = frame.yPos
                 curr_z_from_render   = frame.zPos
                 curr_yaw_from_render = math.fmod(frame.yaw, 360)
                 if self.require_move:
+                    #print('render move required')
                     if math.fabs( curr_x_from_render - self.prev_x ) > self.tolerance or\
                        math.fabs( curr_y_from_render - self.prev_y ) > self.tolerance or\
                        math.fabs( curr_z_from_render - self.prev_z ) > self.tolerance:
-                        #print('received a move.')
+                        #print('render received a move.')
 
                         break
                 elif self.require_yaw_change:
                     if math.fabs( curr_yaw_from_render - self.prev_yaw ) > self.tolerance:
-                        #print('received a turn.')
+                        #print('render received a turn.')
                         break
                 else:
-                    #print('received.')
+                    #print('render received.')
                     break
             
         num_frames_before_get = len(world_state.video_frames)
@@ -180,7 +224,7 @@ class RandomAgent(object):
                math.fabs( self.curr_y   - self.expected_y   ) > self.tolerance or\
                math.fabs( self.curr_z   - self.expected_z   ) > self.tolerance or\
                math.fabs( self.curr_yaw - self.expected_yaw ) > self.tolerance:
-                print(' - ERROR DETECTED! Expected:',self.expected_x,',',self.expected_y,',',self.expected_z,'yaw',self.expected_yaw)
+                #print(' - ERROR DETECTED! Expected:',self.expected_x,',',self.expected_y,',',self.expected_z,'yaw',self.expected_yaw)
                 #print('RECEIVED:', self.curr_x,',',self.curr_y,',',self.curr_z,'yaw',self.curr_yaw,'turning', self.prev_turn)
                 exit(1)
             else:
@@ -196,7 +240,7 @@ class RandomAgent(object):
                math.fabs( curr_y_from_render   - self.expected_y   ) > self.tolerance or \
                math.fabs( curr_z_from_render   - self.expected_z   ) > self.tolerance or \
                math.fabs( curr_yaw_from_render - self.expected_yaw ) > self.tolerance:
-                print(' - ERROR DETECTED! Expected:',self.expected_x,',',self.expected_y,',',self.expected_z,'yaw',self.expected_yaw)
+                #print(' - ERROR DETECTED! Expected:',self.expected_x,',',self.expected_y,',',self.expected_z,'yaw',self.expected_yaw)
                 exit(1)
             else:
                 pass
@@ -207,75 +251,55 @@ class RandomAgent(object):
             self.prev_yaw = self.curr_yaw
             
         return world_state
+
+
+    def act(self):
+        checks = 0
         
-    def act( self ):
-        '''Take an action from the action_set and set the expected outcome so we can wait for it.'''
-        action_i = list(range(4))
-
         while True:
-            weights = [0.85, 0.00, 0.05, 0.05]
-            i_action = random.choices(action_i, weights)[0]
+            checks += 1
 
-            if i_action == 0 or i_action == 1:
-                i_yaw = indexOfClosest( [0,90,180,270], self.base_yaw )
-                forward = [ (0,1), (-1,0), (0,-1), (1,0) ][ i_yaw ]
-                if i_action == 0:
-                    x = self.prev_x + forward[0]
-                    z = self.prev_z + forward[1]
-                else:
-                    x = self.prev_x - forward[0]
-                    z = self.prev_z - forward[1]
-
-                if self.checkStep(x, z):
-                    break
-            
+            if checks > 30:
+                # if we get really stuck then help it out
+                max_turn = 360
             else:
+                proximity = self.check_proximity(self.prev_x, self.prev_z)
+                max_turn = 15 + int(proximity * 35)
+
+            if random.random() < self.turn_change_chance:
+                self.turn_momentum *= -1
+
+            if self.turn_momentum > 0:
+                yaw_disp = random.randint(0, max_turn)
+            elif self.turn_momentum < 0:
+                yaw_disp = random.randint(-max_turn, 0)
+            else:
+                yaw_disp = random.randint(-max_turn, max_turn)
+
+            new_yaw = math.fmod(360 + self.prev_yaw + yaw_disp, 360)
+
+            x = self.prev_x - math.sin(math.radians(new_yaw))
+            z = self.prev_z + math.cos(math.radians(new_yaw))
+
+            if self.check_step(x, z):
                 break
         
-        self.last_action = i_action
+        self.agent_host.sendCommand(f'tp {x} {self.prev_y} {z}')
 
-        yaw_noise =  random.randint(0, 15)
+        self.expected_x = x
+        self.expected_y = self.prev_y
+        self.expected_z = z
+        self.require_move = True
+        self.turn_momentum = yaw_disp + self.turn_momentum * self.momentum_decay
 
-        if i_action == 0 or i_action == 1:
-            self.agent_host.sendCommand( f'tp {x} {self.prev_y} {z}' )
-
-            if yaw_noise != 0:
-                self.expected_yaw = math.fmod(360 + self.base_yaw + yaw_noise, 360)
-                self.agent_host.sendCommand( f'setYaw {self.expected_yaw}')
-                self.require_yaw_change = True
-            else:
-                self.expected_yaw = self.prev_yaw
-                self.require_yaw_change = False
-
-            self.expected_x = x
-            self.expected_z = z
-            self.expected_y = self.prev_y
-            self.require_move = True
-        else:
-            self.base_yaw = math.fmod(360 + self.base_yaw + [90, -90][i_action-2], 360 )
-            self.expected_yaw = math.fmod(360 + self.base_yaw + yaw_noise, 360 )
-            self.agent_host.sendCommand(f'setYaw {self.expected_yaw}')
-
-            self.expected_x = self.prev_x
-            self.expected_y = self.prev_y
-            self.expected_z = self.prev_z
-            self.require_move = False
+        if yaw_disp != 0:
+            self.agent_host.sendCommand(f'setYaw {new_yaw}')
+            self.expected_yaw = new_yaw
             self.require_yaw_change = True
+        else:
+            self.expected_yaw = self.prev_yaw
+            self.require_yaw_change = False
 
-        #print('base yaw', self.base_yaw)
-        #print('my yaw', self.expected_yaw)
-        #print('Sending', action)
-    
-        
-def indexOfClosest( arr, val ):
-    '''Return the index in arr of the closest float value to val.'''
-    i_closest = None
-    for i,v in enumerate(arr):
-        d = math.fabs( v - val )
-        if i_closest == None or d < d_closest:
-            i_closest = i
-            d_closest = d
-    return i_closest
 
 # -- set up the mission --
 xml = '''<?xml version="1.0"?>
@@ -297,14 +321,14 @@ xml = '''<?xml version="1.0"?>
                 <Weather>clear</Weather>
             </ServerInitialConditions>
             <ServerHandlers>
-		    <FileWorldGenerator src="/home/mag/malmo/mcworldfinished-2" forceReset="1"/> 
+		    <FileWorldGenerator src="/home/maggie/malmo-real/mcworldfinished-2" forceReset="1"/> 
             </ServerHandlers>
         </ServerSection>
 
         <AgentSection mode="Survival">
             <Name>Agent0</Name>
             <AgentStart>
-                  <Placement pitch="0" x="-467.5" y="4" yaw="90" z="-677.5"/>
+                  <Placement pitch="0" x="-475.5" y="4" yaw="90" z="-673.5"/>
             </AgentStart>
             <AgentHandlers>
                 <ObservationFromGrid>
@@ -326,7 +350,6 @@ xml = '''<?xml version="1.0"?>
 my_client_pool = MalmoPython.ClientPool()
 my_client_pool.add(MalmoPython.ClientInfo("127.0.0.1", 10000))
 my_client_pool.add(MalmoPython.ClientInfo("127.0.0.1", 10001))
-my_client_pool.add(MalmoPython.ClientInfo("127.0.0.1", 10002))
 
 my_mission = MalmoPython.MissionSpec(xml,True)
 
@@ -335,7 +358,7 @@ imgs_path = 'data/frames_random_' + missionname + '_' + datetime.datetime.now().
 coords_path = 'data/coords_random_' + missionname + '_' + datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
 
 # -- test each action set in turn --
-max_retries = 3
+max_retries = 1
 action_sets = ['teleport']#,'discrete_relative', 'teleport']
 for action_set in action_sets:
 
@@ -373,7 +396,7 @@ for action_set in action_sets:
     print()
 
     # the main loop:
-    steps = 12000#0 # 83k / 5
+    steps = 14000
     s = 0
     agent = RandomAgent( agent_host, action_set )
     world_state = agent.waitForInitialState()
@@ -392,5 +415,3 @@ for action_set in action_sets:
 
         np_coords = np.stack(agent.coords, axis=0)
         np.save(coords_path, np_coords)
-
-    time.sleep(5) # allow room to release clients
