@@ -2,7 +2,7 @@ import torch
 from torch import nn, optim
 import torch.nn.functional as F
 
-device = 'cuda'
+device = 'cuda:1'
 
 # arch from here: https://github.com/julianstastny/VAE-ResNet18-PyTorch/tree/master
 # with transposed convolutions subbed out -- may need to change that later
@@ -153,7 +153,6 @@ class ResNet18Dec(nn.Module):
         #print('end dec', torch.cuda.memory_allocated(device))
         return x
 
-# TODO is causal???
 class MySelfAttention(nn.Module):
     def __init__(self, embed_dim=144, heads=8):
         super().__init__()
@@ -185,6 +184,9 @@ class PredictiveCoder(nn.Module):
         
         return pred, weights
 
+    def get_latents(self, x):
+        return self.encoder(x)
+    
     def get_latent_preds(self, x):
         batch_size, sequence_length, c, h, w = x.size()
         x = x.view(batch_size * sequence_length, c, h, w)
@@ -207,9 +209,9 @@ class PredictiveCoderWithHead(nn.Module):
     def __init__(self):
         super().__init__()
         self.encoder = ResNet18Enc()
-        self.norm = nn.LayerNorm(144)
+        #self.norm = nn.LayerNorm(144)
         self.attn = MySelfAttention(embed_dim=144)
-        self.decoder = ResNet18Dec()
+        self.decoder = ResNet18Dec(z_dim=144)
 
         self.scale = TurnScaler()
         self.freeze_scale()
@@ -233,14 +235,20 @@ class PredictiveCoderWithHead(nn.Module):
         concatenated_vector = torch.cat((encoded_frames, displacements_scaled), dim=2)
 
         # Apply Layer Normalization
-        normalized_sequence = self.norm(concatenated_vector)
+        #normalized_sequence = concatenated_vector#self.norm(concatenated_vector)
         
-        z, weights = self.attn(normalized_sequence)
+        z, weights = self.attn(concatenated_vector)
 
         pred = self.decoder(z)
         return pred
 
-    def get_latent_preds(self, x, d):
+    def get_latents(self, x):
+        # this presumes the use of a different data set than what you would train it with
+        # aka no sequences
+        return self.encoder(x)
+        
+
+    def get_latent_preds(self, x, d, ablate=-1):
         """
         Return the predicted latents instead of the image
         """
@@ -258,11 +266,11 @@ class PredictiveCoderWithHead(nn.Module):
         concatenated_vector = torch.cat((encoded_frames, displacements_scaled), dim=2)
 
         # Apply Layer Normalization
-        normalized_sequence = self.norm(concatenated_vector)
+        #normalized_sequence = self.norm(concatenated_vector)
         
-        z, weights = self.attn(normalized_sequence)
+        z, weights = self.attn(concatenated_vector)
 
-        return z
+        return z #, weights
 
 class AutoEncoder(nn.Module):
     def __init__(self):
@@ -274,8 +282,70 @@ class AutoEncoder(nn.Module):
         z = self.encoder(x)
         return self.decoder(z)
 
+    def get_latent_preds(self, x):
+        return self.encoder(x)
 
-# TODO: should this also be tasked to predict the head direction of the sample?
+
+class PostPredictionHDPredictor(nn.Module):
+    """
+    A simple feedforward network which predicts the yaw of the agent from a set of latent variables
+    """
+    def __init__(self, latent_model: PredictiveCoder , input_dim=144, hidden_dim=256):
+        super().__init__()
+        self.latent = latent_model
+        
+        self.layer1 = nn.Linear(input_dim, hidden_dim)
+        self.layer2 = nn.Linear(hidden_dim, 1)
+        
+    def forward(self, x, d, ablate=-1):
+        with torch.no_grad():
+            z = self.latent.get_latent_preds(x, d, ablate=ablate)
+        
+        out = F.relu(self.layer1(z))
+        out = self.layer2(out)
+        
+        return out
+
+class PostPredictionLocationPredictor(nn.Module):
+    """
+    A simple feedforward network which predicts the yaw of the agent from a set of latent variables
+    """
+    def __init__(self, latent_model: PredictiveCoder , input_dim=144, hidden_dim=256):
+        super().__init__()
+        self.latent = latent_model
+        
+        self.layer1 = nn.Linear(input_dim, hidden_dim)
+        self.layer2 = nn.Linear(hidden_dim, 2)
+        
+    def forward(self, x, d):
+        with torch.no_grad():
+            z = self.latent.get_latent_preds(x, d, ablate=ablate)
+        
+        out = F.relu(self.layer1(z))
+        out = self.layer2(out)
+        
+        return out
+
+class HeadDirectionPredictor(nn.Module):
+    """
+    A simple feedforward network which predicts the yaw of the agent from a set of latent variables
+    """
+    def __init__(self, latent_model: PredictiveCoder , input_dim=128, hidden_dim=256):
+        super().__init__()
+        self.encoder = latent_model.encoder
+        
+        self.layer1 = nn.Linear(input_dim, hidden_dim)
+        self.layer2 = nn.Linear(hidden_dim, 1)
+        
+    def forward(self, x):
+        with torch.no_grad():
+            z = self.encoder(x)
+        
+        out = F.relu(self.layer1(z))
+        out = self.layer2(out)
+        
+        return out
+
 class LocationPredictor(nn.Module):
     """
     A simple feedforward network which predicts the position of the agent from a set of latent variables
