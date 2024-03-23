@@ -43,9 +43,10 @@ class RandomAgent(object):
         self.min_z = -692
         self.frames = []
         self.coords = []
-        self.turn_momentum = 0
-        self.momentum_decay = 0.8
+        self.move_momentum = 1
+        self.turn_momentum = 1
         self.turn_change_chance = 0.2
+
 
     def waitForInitialState( self ):
         '''Before a command has been sent we wait for an observation of the world and a frame.'''
@@ -69,6 +70,7 @@ class RandomAgent(object):
             self.prev_y   =     obs[u'YPos']
             self.prev_z   =     obs[u'ZPos']
             self.prev_yaw =     obs[u'Yaw']
+            self.prev_dir = self.prev_yaw # the direction of movement and yaw are detangled
             print('Initial position:',self.prev_x,',',self.prev_y,',',self.prev_z,'yaw',self.prev_yaw)
             
         return world_state
@@ -236,65 +238,60 @@ class RandomAgent(object):
 
 
     def act(self):
-        # occasionally just look, don't move
-        r = random.random()
-        if r > 0.90:
-            yaw_disp = random.randint(1, 60) 
-            if r >= 0.95:
-                yaw_disp = -yaw_disp
-            new_yaw = math.fmod(360 + self.prev_yaw + yaw_disp, 360)
-            self.agent_host.sendCommand(f'setYaw {new_yaw}')
-            self.expected_yaw = new_yaw
-            self.expected_x = self.prev_x
-            self.expected_y = self.prev_y
-            self.expected_z = self.prev_z
-            self.require_move = False
-            self.require_yaw_change = True
-        else:
-            #print('move')
-            checks = 0
-            while True:
-                checks += 1
-                if checks > 30:
-                    # if we get really stuck then help it out
-                    max_turn = 360
-                else:
-                    proximity = self.check_proximity(self.prev_x, self.prev_z)
-                    max_turn = 15 + int(proximity * 25)
+        checks = 0
 
-                if r < self.turn_change_chance:
+        while True:
+            checks += 1
+
+            if checks > 30:
+                # if we get really stuck then help it out
+                max_turn = 360
+                max_view_change = 360
+            else:
+                proximity = self.check_proximity(self.prev_x, self.prev_z)
+                max_turn = 15 + int(proximity * 35)
+                max_view_change = 50
+            
+            if random.random() < self.turn_change_chance:
+                self.move_momentum *= -1
+
+            if self.move_momentum > 0:
+                move_angle_disp = random.randint(0, max_turn)
+            else:
+                move_angle_disp = random.randint(-max_turn, 0)
+
+            move_angle = math.fmod(360 + self.prev_dir + move_angle_disp, 360)
+            x = self.prev_x - math.sin(math.radians(move_angle))
+            z = self.prev_z + math.cos(math.radians(move_angle))
+
+            if self.check_step(x, z):
+                if random.random() < self.turn_change_chance:
                     self.turn_momentum *= -1
 
                 if self.turn_momentum > 0:
-                    yaw_disp = random.randint(0, max_turn)
-                elif self.turn_momentum < 0:
-                    yaw_disp = random.randint(-max_turn, 0)
+                    yaw_disp = random.randint(0, max_view_change)
                 else:
-                    yaw_disp = random.randint(-max_turn, max_turn)
+                    yaw_disp = random.randint(-max_view_change, 0)
 
-                new_yaw = math.fmod(360 + self.prev_yaw + yaw_disp, 360)
+                new_yaw = max(move_angle - 50, min(move_angle + 50, self.prev_yaw + yaw_disp))
+                new_yaw = math.fmod(360 + new_yaw, 360)
 
-                x = self.prev_x - math.sin(math.radians(new_yaw))
-                z = self.prev_z + math.cos(math.radians(new_yaw))
+                break
 
-                if self.check_step(x, z):
-                    break
-            
-            self.agent_host.sendCommand(f'tp {x} {self.prev_y} {z}')
+        self.agent_host.sendCommand(f'tp {x} {self.prev_y} {z}')
+        self.expected_x = x
+        self.expected_y = self.prev_y
+        self.expected_z = z
+        self.require_move = True
+        self.prev_dir = move_angle
 
-            self.expected_x = x
-            self.expected_y = self.prev_y
-            self.expected_z = z
-            self.require_move = True
-            self.turn_momentum = yaw_disp + self.turn_momentum * self.momentum_decay
-
-            if yaw_disp != 0:
-                self.agent_host.sendCommand(f'setYaw {new_yaw}')
-                self.expected_yaw = new_yaw
-                self.require_yaw_change = True
-            else:
-                self.expected_yaw = self.prev_yaw
-                self.require_yaw_change = False
+        if yaw_disp != 0:
+            self.agent_host.sendCommand(f'setYaw {new_yaw}')
+            self.expected_yaw = new_yaw
+            self.require_yaw_change = True
+        else:
+            self.expected_yaw = self.prev_yaw
+            self.require_yaw_change = False
 
 
 # -- set up the mission --
@@ -317,7 +314,7 @@ xml = '''<?xml version="1.0"?>
                 <Weather>clear</Weather>
             </ServerInitialConditions>
             <ServerHandlers>
-		    <FileWorldGenerator src="/home/maggie/malmo-real/mcworldfinished-2" forceReset="1"/> 
+		    <FileWorldGenerator src="/Users/mvonebers/malmo/mcworldfinished-2" forceReset="1"/> 
             </ServerHandlers>
         </ServerSection>
 
@@ -335,8 +332,8 @@ xml = '''<?xml version="1.0"?>
                 </ObservationFromGrid>
                 <ObservationFromFullStats/>
                 <VideoProducer want_depth="false">
-                   <Width>64</Width>
-                   <Height>64</Height>
+                   <Width>128</Width>
+                   <Height>128</Height>
                 </VideoProducer>
             </AgentHandlers>            
         </AgentSection>
@@ -351,8 +348,8 @@ my_client_pool.add(MalmoPython.ClientInfo("127.0.0.1", 10002))
 my_mission = MalmoPython.MissionSpec(xml,True)
 
 missionname = 'detached'
-imgs_path = 'data/frames_random_' + missionname + '_' + datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
-coords_path = 'data/coords_random_' + missionname + '_' + datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
+imgs_path = 'data/frames_continuous_' + missionname + '_' + datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
+coords_path = 'data/coords_continuous_' + missionname + '_' + datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
 
 # -- test each action set in turn --
 max_retries = 1
@@ -393,22 +390,26 @@ for action_set in action_sets:
     print()
 
     # the main loop:
-    steps = 15000
+    steps = 100
     s = 0
     agent = RandomAgent( agent_host, action_set )
     world_state = agent.waitForInitialState()
     
-    while world_state.is_mission_running and s < steps:
-        agent.act()
-        world_state = agent.waitForNextState()
-        s += 1
+    try: 
+        while world_state.is_mission_running and s < steps:
+            agent.act()
+            world_state = agent.waitForNextState()
+            s += 1
 
-    print('Saving frames')
 
-    if agent.frames:
-        print(len(agent.frames), len(agent.coords))
-        np_frames = np.stack(agent.frames, axis=0 )
-        np.save(imgs_path, agent.frames)
+    except Exception:
+        print("encountered error")
 
-        np_coords = np.stack(agent.coords, axis=0)
-        np.save(coords_path, np_coords)
+    finally:
+        if agent.frames:
+            print(len(agent.frames), len(agent.coords))
+            np_frames = np.stack(agent.frames, axis=0 )
+            np.save(imgs_path, agent.frames)
+
+            np_coords = np.stack(agent.coords, axis=0)
+            np.save(coords_path, np_coords)

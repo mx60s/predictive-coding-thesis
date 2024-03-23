@@ -1,3 +1,4 @@
+
 #from __future__ import print_function
 
 #from future import standard_library
@@ -15,6 +16,7 @@ import time
 import malmoutils
 import numpy as np
 import datetime
+
 if sys.version_info[0] == 2:
     # Workaround for https://github.com/PythonCharmers/python-future/issues/262
     import Tkinter as tk
@@ -23,8 +25,10 @@ else:
     
 malmoutils.fix_print()
 
+
 agent_host = MalmoPython.AgentHost()
 malmoutils.parse_command_line(agent_host)
+
 
 save_images = True
 if save_images:        
@@ -305,7 +309,7 @@ class RandomAgent(object):
 xml = '''<?xml version="1.0"?>
     <Mission xmlns="http://ProjectMalmo.microsoft.com" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
         <About>
-            <Summary>Facing north (like the paper)</Summary>
+            <Summary>Facing forward</Summary>
         </About>
 
         <ModSettings>
@@ -321,7 +325,7 @@ xml = '''<?xml version="1.0"?>
                 <Weather>clear</Weather>
             </ServerInitialConditions>
             <ServerHandlers>
-		    <FileWorldGenerator src="/home/maggie/malmo-real/mcworldfinished-2" forceReset="1"/> 
+		    <FileWorldGenerator src="/Users/mvonebers/malmo/mcworldfinished-2" forceReset="1"/> 
             </ServerHandlers>
         </ServerSection>
 
@@ -346,66 +350,69 @@ xml = '''<?xml version="1.0"?>
         </AgentSection>
 </Mission>'''
 
-
 my_client_pool = MalmoPython.ClientPool()
 my_client_pool.add(MalmoPython.ClientInfo("127.0.0.1", 10000))
 my_client_pool.add(MalmoPython.ClientInfo("127.0.0.1", 10001))
 
 my_mission = MalmoPython.MissionSpec(xml,True)
 
-missionname = 'faceforward'
-imgs_path = 'data/frames_random_' + missionname + '_' + datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
-coords_path = 'data/coords_random_' + missionname + '_' + datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
+missionname = 'continuous'
+imgs_path = 'data/frames_' + missionname + '_' + datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
+coords_path = 'data/coords_' + missionname + '_' + datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
 
 # -- test each action set in turn --
 max_retries = 1
-action_sets = ['teleport']#,'discrete_relative', 'teleport']
-for action_set in action_sets:
+action_sets = ['teleport']
+try:
+    for action_set in action_sets:
+        if action_set == 'discrete_absolute':
+            my_mission.allowAllDiscreteMovementCommands()
+        elif action_set == 'discrete_relative':
+            my_mission.allowAllDiscreteMovementCommands()
+        elif action_set == 'teleport':
+            my_mission.allowAllAbsoluteMovementCommands()
+        else:
+            print('ERROR: Unsupported action set:',action_set)
+            exit(1)
 
-    if action_set == 'discrete_absolute':
-        my_mission.allowAllDiscreteMovementCommands()
-    elif action_set == 'discrete_relative':
-        my_mission.allowAllDiscreteMovementCommands()
-    elif action_set == 'teleport':
-        my_mission.allowAllAbsoluteMovementCommands()
-    else:
-        print('ERROR: Unsupported action set:',action_set)
-        exit(1)
+        my_mission_recording = MalmoPython.MissionRecordSpec()
+        #my_mission_recording = malmoutils.get_default_recording_object(agent_host, action_set)
+        for retry in range(max_retries):
+            try:
+                agent_host.startMission( my_mission, my_client_pool, my_mission_recording,0, "craftTestExperiment" )
+                break
+            except RuntimeError as e:
+                if retry == max_retries - 1:
+                    print("Error starting mission:",e)
+                    exit(1)
+                else:
+                    time.sleep(2.5)
 
-    my_mission_recording = MalmoPython.MissionRecordSpec()
-    #my_mission_recording = malmoutils.get_default_recording_object(agent_host, action_set)
-    for retry in range(max_retries):
-        try:
-            agent_host.startMission( my_mission, my_client_pool, my_mission_recording,0, "craftTestExperiment" )
-            break
-        except RuntimeError as e:
-            if retry == max_retries - 1:
-                print("Error starting mission:",e)
-                exit(1)
-            else:
-                time.sleep(2.5)
-
-    print("Waiting for the mission to start", end=' ')
-    world_state = agent_host.getWorldState()
-    while not world_state.has_mission_begun:
-        print(".", end="")
-        time.sleep(0.1)
+        print("Waiting for the mission to start", end=' ')
         world_state = agent_host.getWorldState()
-        for error in world_state.errors:
-            print("Error:",error.text)
-    print()
+        while not world_state.has_mission_begun:
+            print(".", end="")
+            time.sleep(0.1)
+            world_state = agent_host.getWorldState()
+            for error in world_state.errors:
+                print("Error:",error.text)
+        print()
 
-    # the main loop:
-    steps = 14000
-    s = 0
-    agent = RandomAgent( agent_host, action_set )
-    world_state = agent.waitForInitialState()
-    
-    while world_state.is_mission_running and s < steps:
-        agent.act()
-        world_state = agent.waitForNextState()
-        s += 1
+        # the main loop:
+        steps = 10000
+        s = 0
+        agent = RandomAgent( agent_host, action_set )
+        world_state = agent.waitForInitialState()
+        
+        while world_state.is_mission_running and s < steps:
+            agent.act()
+            world_state = agent.waitForNextState()
+            s += 1
 
+except Exception:
+    print('Encountered error')
+
+finally:
     print('Saving frames')
 
     if agent.frames:
